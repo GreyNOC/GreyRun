@@ -29,7 +29,7 @@ jobs:
           pip install -e ".[full]"
 
       - name: Byte-compile
-        run: python -m py_compile greyrun/*.py
+        run: python -m compileall -q greyrun   # directory arg works on all shells (no glob)
 
       - name: Run tests
         run: python -m unittest discover -s tests -v
