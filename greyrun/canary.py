@@ -1,11 +1,11 @@
 """Canary (honeypot) files.
 
-A canary is a decoy file planted in a protected directory. It is never opened
-or modified by any legitimate workflow, so *any* change, rename or deletion of
-a canary is a near-certain sign that something is sweeping the directory and
-encrypting files -- usually ransomware. Because attackers commonly enumerate a
-folder in name order, GreyRun gives canaries names that sort to the very front
-and very back of a listing so they are among the first and last things hit.
+A canary is a decoy file planted in a protected directory. No legitimate
+workflow opens or modifies it, so any change, rename, or deletion of a canary
+indicates that something is sweeping the directory and encrypting files
+(usually ransomware). Because attackers commonly enumerate a folder in name
+order, GreyRun names canaries so they sort to the front and back of a listing,
+putting them among the first and last files hit.
 """
 
 from __future__ import annotations

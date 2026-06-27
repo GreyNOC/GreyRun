@@ -1,18 +1,17 @@
-"""Autostart -- run the GreyRun monitor automatically at logon.
+"""Autostart: run the GreyRun monitor automatically at logon.
 
 Two mechanisms are supported on Windows:
 
-* **Scheduled task** (`task`) -- triggered at logon and, when installed from an
+* Scheduled task (`task`): triggered at logon and, when installed from an
   elevated console, runs with highest privileges so the responder can act on
   processes it does not own. Creating it needs an Administrator shell.
-* **Startup folder** (`startup`) -- a tiny launcher dropped in the user's
-  Startup folder. Needs no admin rights, but the monitor then runs at normal
-  integrity (fine for detection/alerting; weaker for killing other users'
-  processes).
+* Startup folder (`startup`): a launcher dropped in the user's Startup folder.
+  Needs no admin rights, but the monitor then runs at normal integrity (fine
+  for detection/alerting, weaker for killing other users' processes).
 
 ``enable`` picks the scheduled task when run elevated and otherwise falls back
 to the Startup-folder method, so autostart can always be set up. On non-Windows
-platforms we print a ready-to-use cron line instead.
+platforms it prints a cron line instead.
 """
 
 from __future__ import annotations

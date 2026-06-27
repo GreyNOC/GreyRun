@@ -2,8 +2,8 @@
 
 Wires live filesystem events into the :class:`BehaviorEngine` and, when the
 threat level rises, into the :class:`Responder`. It prefers ``watchdog`` for
-efficient OS-level notifications and transparently falls back to a stdlib
-polling scanner when watchdog is not installed, so the monitor always runs.
+efficient OS-level notifications and falls back to a stdlib polling scanner when
+watchdog is not installed, so the monitor always runs.
 """
 
 from __future__ import annotations
@@ -49,7 +49,7 @@ class Monitor:
         self._lock = threading.Lock()
         self._response_inflight_rank = 0  # rank of a response currently running
 
-    # -- event sink shared by both backends --
+    # event sink shared by both backends
     def _ignore(self, path: str) -> bool:
         """Drop events for our own state dir and for excluded *sub*directories.
 
@@ -127,7 +127,7 @@ class Monitor:
 
         threading.Thread(target=_work, daemon=True).start()
 
-    # -- heartbeat --
+    # heartbeat
     def _heartbeat_loop(self) -> None:
         while not self._stop.wait(self.heartbeat):
             snap = self.engine.snapshot()
@@ -142,7 +142,7 @@ class Monitor:
         """Signal the monitor to shut down (used by tests/embedders)."""
         self._stop.set()
 
-    # -- run loops --
+    # run loops
     def run(self) -> None:
         console.rule("LIVE MONITOR")
         backend = "watchdog (OS events)" if WATCHDOG else "polling (stdlib)"

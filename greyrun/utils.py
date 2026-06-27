@@ -7,7 +7,7 @@ import os
 from datetime import datetime, timezone
 from typing import Iterable, Iterator, List, Optional, Sequence
 
-# Directories we never descend into -- noisy, volatile, or owned by GreyRun.
+# Directories we never descend into: noisy, volatile, or owned by GreyRun.
 DEFAULT_EXCLUDE_DIRS = {
     ".git",
     ".greyrun",

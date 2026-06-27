@@ -2,15 +2,15 @@
 
 Two complementary detectors share one scoring vocabulary:
 
-* :func:`scan` -- a stateless, on-demand sweep of the watched tree (optionally
+* :func:`scan`: a stateless, on-demand sweep of the watched tree (optionally
   against a baseline) that produces a risk report.
-* :class:`BehaviorEngine` -- a stateful machine fed live filesystem events by
-  the monitor. It keeps a decaying, windowed score so that a *burst* of small
-  individually-innocent events (the signature of an encryption sweep) escalates
-  into a high-confidence threat level.
+* :class:`BehaviorEngine`: a stateful machine fed live filesystem events by the
+  monitor. It keeps a decaying windowed score, so a burst of individually
+  innocent events (the signature of an encryption sweep) escalates into a
+  high-confidence threat level.
 
 Both map a numeric risk score onto the same escalating levels, which the
-responder then acts on.
+responder acts on.
 """
 
 from __future__ import annotations
@@ -74,7 +74,7 @@ def scan(config: Config, paths: Paths, baseline: Optional[Baseline] = None) -> S
     """Sweep the watched tree and produce a risk report."""
     report = ScanReport()
 
-    # 1. Canaries -- the strongest single signal.
+    # 1. Canaries: the highest-weight signal.
     statuses = canary_mod.verify(paths)
     report.canaries_total = len(statuses)
     for status in statuses:
@@ -153,7 +153,7 @@ class BehaviorEngine:
         self._families: Dict[str, int] = {}
         self._canary_registry = canary_mod.registry(paths)
 
-    # -- internal helpers (call with lock held) --
+    # internal helpers (call with lock held)
     def _prune(self, now: float) -> None:
         window = self.config.burst_window_sec
         cutoff = now - window
@@ -175,7 +175,7 @@ class BehaviorEngine:
     def _score(self) -> int:
         return min(sum(s.weight for s in self._signals), 999)
 
-    # -- public API --
+    # public API
     def observe(self, event_type: str, path: str, dest: Optional[str] = None) -> Assessment:
         """Feed one filesystem event. ``event_type`` is one of
         ``created|modified|deleted|moved``. Returns the current assessment."""
@@ -184,7 +184,7 @@ class BehaviorEngine:
             self._prune(now)
             target = dest or path
 
-            # Canary tamper -- check both the event path and any move source.
+            # Canary tamper: check both the event path and any move source.
             for candidate in filter(None, (path, dest)):
                 state = canary_mod.check_one(candidate, self._canary_registry)
                 if state:

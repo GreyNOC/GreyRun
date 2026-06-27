@@ -1,20 +1,18 @@
 """Safe ransomware-behaviour simulator (for testing and demos only).
 
-This module lets you watch GreyRun's detections and response fire *without any
-real malware*. It is the defensive equivalent of a fire drill.
+Exercises GreyRun's detection and response without any real malware. Safety
+guarantees:
 
-Hard safety guarantees:
+* It operates only inside a dedicated sandbox directory that it creates and
+  stamps with a marker file. It re-verifies the marker before touching anything
+  and refuses to act on a directory it did not make.
+* It generates its own throw-away sample documents and rewrites only those.
+* It does not spread, makes no network calls, and cannot reach files outside
+  the sandbox.
 
-* It only ever operates inside a dedicated **sandbox** directory that it
-  creates and stamps with a marker file. Before touching anything it
-  re-verifies the marker; it refuses to act on any directory it did not make.
-* It generates its own throw-away sample documents and only rewrites those.
-* It does not spread, does not call out to a network, and cannot reach files
-  outside the sandbox.
-
-It mimics the *observable behaviour* of an encryption sweep -- rapidly
-overwriting files with random bytes, appending a locked extension and dropping
-a ransom note -- purely so the detector has something to detect.
+It reproduces the observable behaviour of an encryption sweep (overwriting
+files with random bytes, appending a locked extension, dropping a ransom note)
+so the detector has something to detect.
 """
 
 from __future__ import annotations
@@ -122,7 +120,7 @@ def simulate_attack(
     encrypted = 0
     real_root = os.path.realpath(root)
     for path in targets:
-        # Re-verify on every iteration -- defence in depth. Resolve symlinks
+        # Re-verify every iteration; defence in depth. Resolve symlinks
         # (realpath) so a reparse point can't redirect a write outside the box.
         try:
             real_path = os.path.realpath(path)

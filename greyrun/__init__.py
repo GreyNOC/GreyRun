@@ -1,4 +1,4 @@
-"""GreyRun -- a defensive anti-ransomware CLI.
+"""GreyRun: a defensive anti-ransomware CLI.
 
 GreyRun protects a set of "watched" directories using several layered,
 behaviour-based detections (canary honeypots, Shannon-entropy analysis,

@@ -287,7 +287,7 @@ def cmd_restore(args, config: Config, paths: Paths) -> int:
 def cmd_exclude(args, config: Config, paths: Paths) -> int:
     """Manage excluded subfolder names. Matching is by folder *name* at any
     depth, so excluding 'GreyNOC CORE' skips it wherever it appears under a
-    protected path -- handy for keeping huge dev trees out of monitoring."""
+    protected path; handy for keeping huge dev trees out of monitoring."""
     sub = args.exclude_cmd or "list"
     if sub == "list":
         console.rule("EXCLUDED FOLDER NAMES")

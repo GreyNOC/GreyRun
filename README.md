@@ -21,7 +21,7 @@ a good backup — restore your files from its own protected vault.
 ## Why behaviour, not signatures?
 
 New ransomware strains appear daily, so a signature for "WannaCry" or "LockBit"
-is always one step behind. But almost all ransomware *behaves* the same way:
+always lags the latest variant. Almost all ransomware behaves the same way:
 
 * it sweeps through a folder opening and rewriting many files quickly,
 * the rewritten files become **high-entropy** (encrypted data looks random),
@@ -33,11 +33,11 @@ risk score:
 
 | Detector | Signal | Strength |
 |---|---|---|
-| **Canary honeypots** | A decoy file is modified/renamed/deleted | ★★★★★ decisive |
-| **Entropy analysis** | A document suddenly reads as random bytes | ★★★★ |
-| **Behavioural burst** | Many files changed in a short window | ★★★★ |
-| **Extension signatures** | Known ransomware suffix appears | ★★★ |
-| **Ransom-note detection** | A note-like filename appears | ★★★ |
+| **Canary honeypots** | A decoy file is modified/renamed/deleted | Decisive |
+| **Entropy analysis** | A document suddenly reads as random bytes | High |
+| **Behavioural burst** | Many files changed in a short window | High |
+| **Extension signatures** | Known ransomware suffix appears | Medium |
+| **Ransom-note detection** | A note-like filename appears | Medium |
 
 No single weak signal trips a response; they accumulate, and the strongest
 (a touched canary) is on its own enough to act.
@@ -287,19 +287,18 @@ python -m unittest discover -s tests
 
 ## Honest limitations
 
-GreyRun is a strong *additional* layer, not a silver bullet:
+GreyRun is an additional layer, not a complete defense:
 
-* It reduces damage by catching an attack mid-sweep; some files may be lost
-  **before** detection. Keep real, **offline/immutable backups** as well — the
-  built-in vault is a fast local rollback, not a replacement for 3-2-1 backups.
-* Read-only **lockdown** stops naive encrypters but a sophisticated one running
-  as your user can clear the attribute; the process **suspend/kill** is the
-  hard stop, and that needs `psutil`.
+* It reduces damage by catching an attack mid-sweep, but some files may be lost
+  before detection. Keep **offline/immutable backups** as well; the built-in
+  vault is a fast local rollback, not a replacement for 3-2-1 backups.
+* Read-only **lockdown** stops naive encrypters, but one running as your user
+  can clear the attribute. The process **suspend/kill** is the hard stop, and
+  that needs `psutil`.
 * Detecting an attacker by its open handles can miss strains that hold each file
-  open only briefly — the other layers (canaries, entropy, lockdown, backups)
+  open only briefly. The other layers (canaries, entropy, lockdown, backups)
   cover that gap.
 * For automatic process termination, run GreyRun elevated (Administrator) so it
   can act on processes it doesn't own.
 
-Defense in depth: keep your OS patched, keep offline backups, and run GreyRun as
-one more layer that buys you time and visibility.
+Keep your OS patched, keep offline backups, and run GreyRun as one more layer.

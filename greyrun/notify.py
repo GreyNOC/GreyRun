@@ -1,17 +1,15 @@
 """External alerting over webhook and email (standard library only).
 
-On a high-confidence incident GreyRun can notify you off-box so you find out
-even if you are not at the console:
+On a high-confidence incident GreyRun can notify you off-box:
 
-* **Webhook** -- an HTTP POST of a JSON payload. The payload includes a ``text``
-  field, so it works as-is with Slack, Discord and Microsoft Teams incoming
-  webhooks, as well as any generic endpoint.
-* **Email** -- a plain SMTP message (TLS optional).
+* Webhook: an HTTP POST of a JSON payload. The payload includes a ``text``
+  field, so it works with Slack, Discord, and Microsoft Teams incoming webhooks
+  as well as a generic endpoint.
+* Email: a plain SMTP message (TLS optional).
 
-Secrets can be kept out of the config file via the environment variables
-``GREYRUN_WEBHOOK_URL`` and ``GREYRUN_SMTP_PASSWORD``. All sending happens with
-short timeouts and never raises into the caller -- a failed alert must never
-take down the monitor.
+Secrets can be kept out of the config file via ``GREYRUN_WEBHOOK_URL`` and
+``GREYRUN_SMTP_PASSWORD``. Sending uses short timeouts and never raises into the
+caller, so a failed alert cannot take down the monitor.
 """
 
 from __future__ import annotations
@@ -67,8 +65,8 @@ def build_summary(assessment: Assessment, actions: Optional[List[str]] = None) -
 
 
 def _is_link_local(host: str) -> bool:
-    """True if the host is (or resolves to) a link-local address — the cloud
-    metadata SSRF target (169.254.169.254 / fe80::). Best-effort."""
+    """True if the host is (or resolves to) a link-local address (the cloud
+    metadata SSRF target, 169.254.169.254 / fe80::). Best-effort."""
     if not host:
         return False
     try:

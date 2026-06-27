@@ -1,18 +1,16 @@
-"""Active response -- the "fight back" half of GreyRun.
+"""Active response: identify, contain, and terminate the encrypter.
 
 When the detector raises the threat level, the responder:
 
-1. **Identifies** the offending process by looking for processes holding open
-   handles inside the protected tree and doing heavy write I/O (needs psutil).
-2. **Contains** it -- first *suspending* it (reversible), then *terminating*
-   it if policy allows and the threat is critical.
-3. **Locks down** the affected directories by marking files read-only so a
-   process that survives can't keep encrypting.
-4. **Captures forensics** -- a JSON snapshot of the suspect process tree.
+1. Identifies the offending process by its open handles inside the protected
+   tree and its write I/O (requires psutil).
+2. Contains it: suspend (reversible), then terminate if policy allows and the
+   threat is critical.
+3. Locks down the affected directories by marking files read-only.
+4. Captures a JSON forensic snapshot of the suspect process tree.
 
-Every step is best-effort and guarded: GreyRun must never crash the box it is
-protecting, and it refuses to suspend or kill a small set of critical OS
-processes.
+Every step is guarded: it must never crash the host it protects, and it never
+suspends or kills a small set of critical OS processes.
 """
 
 from __future__ import annotations
@@ -56,7 +54,7 @@ class Suspect:
     username: str = ""
     exe: str = ""
     # Only processes proven to hold an open handle inside a protected path are
-    # "actionable" -- i.e. eligible for automatic suspend/terminate. Processes
+    # "actionable" means eligible for automatic suspend/terminate. Processes
     # that merely look busy (high write I/O elsewhere) are reported but never
     # auto-contained, so GreyRun won't suspend an innocent browser or backup job.
     actionable: bool = False
@@ -117,7 +115,7 @@ def identify_suspects(config: Config, limit: int = 5, confirm_top: int = 12) -> 
 
     Two passes for speed: a *cheap* pass scores every process on write I/O and
     age (no handle enumeration), then we confirm only the top candidates with
-    ``open_files()`` -- which is expensive on Windows (~100ms/process) -- and
+    ``open_files()`` (expensive on Windows, ~100ms/process) and
     add the strong "open handle inside a protected path" signal. An active
     encrypter writes constantly, so it ranks at the top of the cheap pass and
     is confirmed first; bounding ``confirm_top`` keeps total latency to ~1-2s
@@ -130,7 +128,7 @@ def identify_suspects(config: Config, limit: int = 5, confirm_top: int = 12) -> 
     roots = config.watched_paths
     now = utils.now_ts()
 
-    # -- cheap pass: write I/O + recency, no handle enumeration --
+    # cheap pass: write I/O + recency, no handle enumeration
     prelim: List[tuple] = []
     for proc in psutil.process_iter(["pid", "name"]):
         pid = proc.info.get("pid")
@@ -157,7 +155,7 @@ def identify_suspects(config: Config, limit: int = 5, confirm_top: int = 12) -> 
 
     prelim.sort(key=lambda t: t[0], reverse=True)
 
-    # -- confirm pass: handle enumeration only for the top candidates --
+    # confirm pass: handle enumeration only for the top candidates
     suspects: List[Suspect] = []
     for score, proc, evidence in prelim[:confirm_top]:
         try:
@@ -500,9 +498,9 @@ class Responder:
                     if self.incident_file:
                         actions.append(f"forensics captured -> {self.incident_file}")
 
-                # If nothing is caught red-handed (encrypters often hold each
-                # file open only briefly), report busy processes for review but
-                # do NOT auto-contain on that weak evidence.
+                # If no process is caught holding an open handle (encrypters
+                # often hold each file open only briefly), report busy
+                # processes for review but do not auto-contain on weak evidence.
                 if suspects and not any(s.actionable for s in suspects):
                     review = ", ".join(f"{s.name}(pid {s.pid})" for s in suspects[:3])
                     actions.append(f"no process caught with open protected-file "

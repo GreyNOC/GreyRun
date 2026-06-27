@@ -1,18 +1,18 @@
-"""Quarantine -- move ransomware artifacts out of protected folders.
+"""Quarantine: move ransomware artifacts out of protected folders.
 
 In-place lockdown (marking files read-only) stops further encryption but leaves
-the attacker's droppings -- the ``.locked`` files and ransom notes -- littered
-through the user's folders. Quarantine is the complementary action: it *moves*
-those detected artifacts into a holding area under the GreyRun vault, recording
-where each came from so the move can be fully reversed if it was a false alarm.
+the attacker's output (``.locked`` files and ransom notes) scattered through the
+user's folders. Quarantine moves those detected artifacts into a holding area
+under the GreyRun vault and records where each came from, so the move can be
+reversed if it was a false alarm.
 
-Only files that look like attack artifacts are ever moved:
+Only files that look like attack artifacts are moved:
 
 * files carrying a known ransomware extension,
 * files whose name matches a ransom-note pattern, and (optionally)
 * document-class files that now read as encrypted.
 
-Ordinary, healthy files are never touched.
+Ordinary files are not touched.
 """
 
 from __future__ import annotations

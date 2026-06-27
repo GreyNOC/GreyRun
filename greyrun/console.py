@@ -221,7 +221,7 @@ def banner() -> None:
 """
     plain(paint(art, "cyan", "bold"))
     plain(paint(f"  {__app_name__} v{__version__} — {__tagline__}", "white"))
-    plain(paint("  Defensive use only. Protect what matters.", "grey"))
+    plain(paint("  Defensive use only.", "grey"))
     plain("")
 
 

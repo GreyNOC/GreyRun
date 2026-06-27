@@ -1,14 +1,13 @@
-"""Protected backup vault.
+"""Content-addressed backup vault.
 
-Backups are the ultimate answer to ransomware: if you can restore, you do not
-pay. GreyRun keeps a *content-addressed* vault under ``~/.greyrun/vault`` --
-each unique file body is stored once under its SHA-256, and every snapshot is
-just a manifest of references. Repeated snapshots of a mostly-unchanged tree
-therefore cost almost nothing, and stored blobs are marked read-only.
+GreyRun keeps a content-addressed vault under ``~/.greyrun/vault``: each unique
+file body is stored once under its SHA-256, and every snapshot is a manifest of
+references, so repeated snapshots of a mostly-unchanged tree cost little. Stored
+blobs are marked read-only.
 
-The vault is meant to live on a separate or external volume (point
-``GREYRUN_HOME`` at it). It is not a substitute for true offline/immutable
-backups, but it gives a fast local rollback after an incident.
+Point ``GREYRUN_HOME`` at a separate or external volume to keep the vault off
+the protected disk. This is a fast local rollback, not a substitute for
+offline/immutable backups.
 """
 
 from __future__ import annotations
@@ -197,7 +196,7 @@ def restore(
 
     By default files go back to their original locations, but only if missing
     (use ``overwrite=True`` to replace). Pass ``into`` to restore into a fresh
-    directory instead -- the safest option after an active incident.
+    directory instead, the safest option after an active incident.
     """
     manifest = _load_manifest(paths, snapshot_id)
     if manifest is None:
