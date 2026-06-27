@@ -3,6 +3,18 @@
 All notable changes to GreyRun are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.1.1] — 2026-06-27
+
+### Fixed
+- CI: byte-compile step uses `compileall` (a directory argument) instead of a
+  `*.py` glob, which the Windows PowerShell shell did not expand — the full
+  Windows × Python matrix is now green.
+
+### Changed
+- Tone pass over docstrings, comments, and docs: flattened editorial prose to
+  terse technical descriptions and collapsed em-dash asides. No functional
+  change; the test suite is unchanged.
+
 ## [1.1.0] — 2026-06-27
 
 ### Added
@@ -46,5 +58,6 @@ Initial release.
 - Safe, sandboxed attack simulator for drills.
 - `gr` short CLI alias and `exclude` command for skipping noisy folders.
 
+[1.1.1]: https://github.com/GreyNOC/GreyRun/releases/tag/v1.1.1
 [1.1.0]: https://github.com/GreyNOC/GreyRun/releases/tag/v1.1.0
 [1.0.0]: https://github.com/GreyNOC/GreyRun/releases/tag/v1.0.0
