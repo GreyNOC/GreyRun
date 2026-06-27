@@ -95,6 +95,17 @@ python -m greyrun monitor
 python -m greyrun scan
 ```
 
+> **Tip — protect document stores, not giant code trees.** GreyRun is built for
+> folders of documents/photos. If a protected folder contains a large, busy dev
+> project (tens of thousands of files), `baseline`/`backup` get slow and normal
+> file churn can raise harmless "burst" ALERTs. Either protect a more targeted
+> folder, or skip the heavy subtree by name:
+> ```
+> greyrun exclude add "my-big-project" node_modules
+> ```
+> Canaries planted in the protected folder's root still trip on any sweep, so
+> excluding a noisy subfolder doesn't remove your tripwire.
+
 If GreyRun ever contains an incident, recover with:
 
 ```bash
@@ -190,6 +201,7 @@ line instead.
 |---|---|
 | `init [paths…]` | Set up protection: add folders, plant canaries, build baseline |
 | `protect <dirs…>` / `unprotect <dirs…>` | Add / remove protected folders |
+| `exclude add\|remove\|list <name>` | Skip subfolders by name (e.g. big dev trees) |
 | `status` | Show configuration, canaries, baseline, backups, capabilities |
 | `scan` | One-shot risk scan (exit code reflects threat level) |
 | `monitor [--mode] [--no-notify]` | Real-time protection |

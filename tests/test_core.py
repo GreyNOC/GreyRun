@@ -314,6 +314,25 @@ class TestLockdown(unittest.TestCase):
         open(f, "w").close()  # now writable again
 
 
+class TestExcludeScoping(unittest.TestCase):
+    def test_excluded_subfolder_is_skipped(self):
+        paths, root = _tmp_paths()
+        watched = os.path.join(root, "docs")
+        devtree = os.path.join(watched, "BigDevProject")
+        utils.ensure_dir(devtree)
+        with open(os.path.join(watched, "real_doc.txt"), "w") as fh:
+            fh.write("keep me")
+        for i in range(5):
+            with open(os.path.join(devtree, f"src{i}.txt"), "w") as fh:
+                fh.write("noise")
+        cfg = Config(watched_paths=[watched],
+                     exclude_dirs=list(utils.DEFAULT_EXCLUDE_DIRS) + ["BigDevProject"])
+        files = list(utils.iter_files(cfg.watched_paths, cfg.exclude_dirs))
+        names = {os.path.basename(f) for f in files}
+        self.assertIn("real_doc.txt", names)
+        self.assertNotIn("src0.txt", names)  # excluded dev tree skipped
+
+
 class TestQuarantine(unittest.TestCase):
     def test_find_move_and_restore(self):
         paths, root = _tmp_paths()

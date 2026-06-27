@@ -284,6 +284,38 @@ def cmd_restore(args, config: Config, paths: Paths) -> int:
     return 0
 
 
+def cmd_exclude(args, config: Config, paths: Paths) -> int:
+    """Manage excluded subfolder names. Matching is by folder *name* at any
+    depth, so excluding 'GreyNOC CORE' skips it wherever it appears under a
+    protected path -- handy for keeping huge dev trees out of monitoring."""
+    sub = args.exclude_cmd or "list"
+    if sub == "list":
+        console.rule("EXCLUDED FOLDER NAMES")
+        for name in sorted(config.exclude_dirs):
+            console.plain("  " + name)
+        console.info("Add with:  greyrun exclude add \"<folder name>\"")
+        return 0
+    if sub == "add":
+        added = 0
+        for name in args.names:
+            if name not in config.exclude_dirs:
+                config.exclude_dirs.append(name)
+                added += 1
+        config.save(paths)
+        console.ok(f"Excluded {added} folder name(s). Now {len(config.exclude_dirs)} total.")
+        return 0
+    if sub == "remove":
+        removed = 0
+        for name in args.names:
+            if name in config.exclude_dirs:
+                config.exclude_dirs.remove(name)
+                removed += 1
+        config.save(paths)
+        console.ok(f"Removed {removed} exclude(s).")
+        return 0
+    return 0
+
+
 def cmd_quarantine(args, config: Config, paths: Paths) -> int:
     sub = args.q_cmd or "run"
 
@@ -578,6 +610,15 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--into", help="Restore into this directory instead of original locations")
     sp.add_argument("--overwrite", action="store_true", help="Overwrite existing files")
     sp.set_defaults(func=cmd_restore)
+
+    sp = sub.add_parser("exclude", help="Manage excluded subfolder names (skip dev trees, etc.)")
+    esub = sp.add_subparsers(dest="exclude_cmd")
+    e_add = esub.add_parser("add", help="Exclude folder name(s)")
+    e_add.add_argument("names", nargs="+")
+    e_rm = esub.add_parser("remove", help="Stop excluding folder name(s)")
+    e_rm.add_argument("names", nargs="+")
+    esub.add_parser("list", help="List excluded folder names")
+    sp.set_defaults(func=cmd_exclude)
 
     sp = sub.add_parser("quarantine", help="Move ransomware artifacts to a safe holding area")
     qsub = sp.add_subparsers(dest="q_cmd")
