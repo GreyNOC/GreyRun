@@ -98,7 +98,7 @@ def scan(config: Config, paths: Paths, baseline: Optional[Baseline] = None) -> S
         # Entropy only where a high reading is actually suspicious.
         if is_document_class(path):
             ent = file_entropy(path)
-            if ent is not None and looks_encrypted(path, ent):
+            if ent is not None and looks_encrypted(path, ent, config.entropy_threshold):
                 report.encrypted_like.append((path, ent))
                 report.risk += W_ENCRYPTED
                 report.findings.append(f"Document looks encrypted (H={ent:.2f}): {path}")
@@ -206,7 +206,9 @@ class BehaviorEngine:
                               f"ransomware extension ({fam})")
                 if is_ransom_note(target):
                     self._add(now, W_RANSOM_NOTE, "note", target, "ransom note")
-                elif is_document_class(target) and looks_encrypted(target):
+                elif is_document_class(target) and looks_encrypted(
+                    target, threshold=self.config.entropy_threshold
+                ):
                     self._add(now, W_ENCRYPTED, "encrypted", target,
                               "document looks encrypted")
 

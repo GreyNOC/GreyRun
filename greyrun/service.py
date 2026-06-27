@@ -121,6 +121,10 @@ def startup_file() -> str:
 def install_startup(config: Config, paths: Paths) -> Tuple[bool, str]:
     if os.name != "nt":
         return False, "Startup-folder autostart is Windows-only."
+    # The home path is interpolated into a WScript .Run command line; a quote
+    # or newline could break out of the quoted argument. Refuse such paths.
+    if '"' in paths.root or "\r" in paths.root or "\n" in paths.root:
+        return False, "Refusing autostart: state-dir path contains an illegal character (\" or newline)."
     target = startup_file()
     cmd = _monitor_command(config, paths, windowless=True)
     # Inside a VBScript string literal each double-quote must be doubled.

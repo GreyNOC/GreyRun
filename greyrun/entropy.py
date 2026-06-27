@@ -71,17 +71,22 @@ def is_document_class(path: str) -> bool:
     return ext in LOW_ENTROPY_EXTS
 
 
-def looks_encrypted(path: str, entropy: Optional[float] = None) -> bool:
+def looks_encrypted(
+    path: str,
+    entropy: Optional[float] = None,
+    threshold: float = ENCRYPTED_THRESHOLD,
+) -> bool:
     """Heuristic: does this file look like it was encrypted in place?
 
     True only when a *document-class* file reads as near-random. This keeps
-    healthy archives, images and media from tripping the detector.
+    healthy archives, images and media from tripping the detector. ``threshold``
+    lets callers honour the user's configured ``entropy_threshold``.
     """
     if entropy is None:
         entropy = file_entropy(path)
     if entropy is None:
         return False
-    return entropy >= ENCRYPTED_THRESHOLD and is_document_class(path)
+    return entropy >= threshold and is_document_class(path)
 
 
 def classify(entropy: Optional[float]) -> str:

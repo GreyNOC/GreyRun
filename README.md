@@ -189,6 +189,12 @@ python -m greyrun test-alert                        # verify your channels
 The webhook URL and SMTP password can also be supplied via `GREYRUN_WEBHOOK_URL`
 and `GREYRUN_SMTP_PASSWORD` so no secrets touch `config.json`.
 
+> **What gets sent:** the alert payload contains this machine's **hostname** and
+> **absolute paths** of the affected files (plus threat level, score, and the
+> likely family). Point it only at endpoints you trust, and prefer an `https://`
+> webhook — a plain `http://` URL sends that data in cleartext and GreyRun will
+> warn you.
+
 ## Run automatically at logon (Windows)
 
 ```bash

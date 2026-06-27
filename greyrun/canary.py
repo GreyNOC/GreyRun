@@ -135,23 +135,32 @@ def deploy(config: Config, paths: Paths) -> Tuple[int, int]:
     return created, skipped
 
 
+def _canary_state(path: str, meta: dict) -> str:
+    """Return 'ok' | 'modified' | 'missing' for one canary.
+
+    Size is checked first, so an *append* or *truncate* (which a prefix-only
+    hash would miss) is caught without reading the file; only when the size is
+    unchanged do we hash the full content to detect in-place edits."""
+    if not os.path.exists(path):
+        return "missing"
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        return "modified"
+    if size != meta.get("size"):
+        return "modified"  # appended/truncated -> tampered
+    import hashlib
+
+    data = utils.read_sample(path, meta["size"])  # size matches -> whole file
+    if data is None:
+        return "modified"
+    return "ok" if hashlib.sha256(data).hexdigest() == meta.get("sha256") else "modified"
+
+
 def verify(paths: Paths) -> List[CanaryStatus]:
     """Check every registered canary's integrity."""
     registry = _registry_load(paths)
-    results: List[CanaryStatus] = []
-    import hashlib
-
-    for path, meta in registry.items():
-        if not os.path.exists(path):
-            results.append(CanaryStatus(path, "missing"))
-            continue
-        data = utils.read_sample(path, meta["size"] + 16)
-        digest = hashlib.sha256(data).hexdigest() if data is not None else None
-        if digest != meta.get("sha256"):
-            results.append(CanaryStatus(path, "modified"))
-        else:
-            results.append(CanaryStatus(path, "ok"))
-    return results
+    return [CanaryStatus(path, _canary_state(path, meta)) for path, meta in registry.items()]
 
 
 def check_one(path: str, registry: Dict[str, dict]) -> Optional[str]:
@@ -160,13 +169,8 @@ def check_one(path: str, registry: Dict[str, dict]) -> Optional[str]:
     meta = registry.get(path)
     if meta is None:
         return None
-    if not os.path.exists(path):
-        return "missing"
-    import hashlib
-
-    data = utils.read_sample(path, meta["size"] + 16)
-    digest = hashlib.sha256(data).hexdigest() if data is not None else None
-    return None if digest == meta.get("sha256") else "modified"
+    state = _canary_state(path, meta)
+    return None if state == "ok" else state
 
 
 def registry(paths: Paths) -> Dict[str, dict]:

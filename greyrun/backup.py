@@ -204,16 +204,29 @@ def restore(
         return None
     restored = skipped = failed = 0
     dest_root = utils.normpath(into) if into else None
+    roots = [utils.normpath(r) for r in manifest.get("roots", [])]
 
     for f in manifest.get("files", []):
         obj = _object_path(paths, f["sha256"])
         if not os.path.exists(obj):
             failed += 1
             continue
+        # Treat the manifest as untrusted: never let a crafted path escape the
+        # restore root (write-anywhere guard, important under elevated runs).
         if dest_root:
-            target = os.path.join(dest_root, f.get("rel") or os.path.basename(f["path"]))
+            rel = f.get("rel") or os.path.basename(f["path"])
+            if os.path.isabs(rel) or ".." in rel.replace("\\", "/").split("/"):
+                failed += 1
+                continue
+            target = utils.normpath(os.path.join(dest_root, rel))
+            if not utils.is_within(target, [dest_root]):
+                failed += 1
+                continue
         else:
-            target = f["path"]
+            target = utils.normpath(f["path"])
+            if roots and not utils.is_within(target, roots):
+                failed += 1  # outside the snapshot's recorded roots -> refuse
+                continue
         if os.path.exists(target) and not overwrite:
             skipped += 1
             continue

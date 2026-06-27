@@ -1,5 +1,6 @@
-# GreyRun runs on the Python standard library alone, but these two packages
-# are strongly recommended — without them the monitor falls back to polling
-# and the responder cannot perform process-level containment.
+# GreyRun's core has ZERO required dependencies (see pyproject.toml:
+# dependencies = []). These two packages are the recommended extras --
+# equivalent to `pip install greyrun[full]`. Without them the monitor falls
+# back to stdlib polling and the responder cannot do process-level containment.
 psutil>=5.9        # process identification, suspend/terminate
 watchdog>=2.1      # efficient OS-level filesystem events

@@ -73,6 +73,13 @@ class TestSignatures(unittest.TestCase):
         self.assertFalse(is_ransom_note("budget.xlsx"))
         self.assertFalse(is_ransom_note("readme.md"))  # ordinary project readme
 
+    def test_no_false_positive_extensions(self):
+        # Common extensions reused by some strains must NOT be flagged, or
+        # every music/Java file would trip the detector.
+        self.assertFalse(is_ransomware_ext("song.mp3"))
+        self.assertFalse(is_ransomware_ext("Main.java"))
+        self.assertFalse(is_ransomware_ext("wallet.dat"))
+
 
 class TestCanary(unittest.TestCase):
     def test_deploy_verify_and_tamper(self):
@@ -96,6 +103,23 @@ class TestCanary(unittest.TestCase):
             self.skipTest("could not modify canary")
         states = {s.state for s in canary_mod.verify(paths)}
         self.assertIn("modified", states)
+
+    def test_append_tamper_is_detected(self):
+        # A prefix-only hash would miss an append; size-check must catch it.
+        paths, root = _tmp_paths()
+        watched = os.path.join(root, "docs")
+        utils.ensure_dir(watched)
+        cfg = Config(watched_paths=[watched], canaries_per_dir=1)
+        canary_mod.deploy(cfg, paths)
+        victim = list(canary_mod.registry(paths))[0]
+        if os.name == "nt":
+            import ctypes
+            ctypes.windll.kernel32.SetFileAttributesW(str(victim), 0x80)
+        with open(victim, "ab") as fh:  # append, keep original prefix intact
+            fh.write(b"extra ransomware bytes")
+        self.assertEqual(
+            canary_mod.check_one(victim, canary_mod.registry(paths)), "modified"
+        )
 
 
 class TestScan(unittest.TestCase):
@@ -314,6 +338,42 @@ class TestLockdown(unittest.TestCase):
         open(f, "w").close()  # now writable again
 
 
+class TestSecurityHardening(unittest.TestCase):
+    def test_entropy_threshold_is_honoured(self):
+        d = tempfile.mkdtemp(prefix="grthr_")
+        doc = os.path.join(d, "report.txt")
+        with open(doc, "wb") as fh:
+            fh.write(os.urandom(20000))  # ~8.0 bits/byte
+        self.assertTrue(looks_encrypted(doc, threshold=7.8))
+        self.assertFalse(looks_encrypted(doc, threshold=9.0))  # unreachable -> off
+
+    def test_restore_rejects_path_traversal(self):
+        import json as _json
+
+        paths, root = _tmp_paths()
+        watched = os.path.join(root, "docs")
+        utils.ensure_dir(watched)
+        with open(os.path.join(watched, "a.txt"), "w") as fh:
+            fh.write("data")
+        cfg = Config(watched_paths=[watched])
+        backup_mod.create_snapshot(cfg, paths)
+
+        # Tamper the snapshot manifest with a traversal 'rel'.
+        snap = sorted(os.listdir(os.path.join(paths.vault, "snapshots")))[-1]
+        mpath = os.path.join(paths.vault, "snapshots", snap)
+        with open(mpath) as fh:
+            m = _json.load(fh)
+        m["files"][0]["rel"] = os.path.join("..", "..", "escape.txt")
+        with open(mpath, "w") as fh:
+            _json.dump(m, fh)
+
+        dest = os.path.join(root, "restore_dest")
+        result = backup_mod.restore(paths, "latest", into=dest, overwrite=True)
+        self.assertEqual(result.restored, 0)   # traversal entry refused
+        self.assertEqual(result.failed, 1)
+        self.assertFalse(os.path.exists(os.path.join(root, "escape.txt")))
+
+
 class TestExcludeScoping(unittest.TestCase):
     def test_excluded_subfolder_is_skipped(self):
         paths, root = _tmp_paths()
@@ -407,15 +467,19 @@ class TestNotify(unittest.TestCase):
         srv = http.server.HTTPServer(("127.0.0.1", 0), Handler)
         port = srv.server_address[1]
         threading.Thread(target=srv.handle_request, daemon=True).start()
-
-        cfg = Config(webhook_url=f"http://127.0.0.1:{port}/hook")
-        results = notify.dispatch(cfg, self._sample(), ["locked down 10 files"])
-        self.assertTrue(any("sent" in r for r in results))
-        time.sleep(0.2)
-        body = received.get("body", {})
-        self.assertEqual(body.get("level"), "CRITICAL")
-        self.assertEqual(body.get("score"), 120)
-        self.assertIn("GreyRun ransomware alert", body.get("text", ""))
+        try:
+            cfg = Config(webhook_url=f"http://127.0.0.1:{port}/hook")
+            results = notify.dispatch(cfg, self._sample(), ["locked down 10 files"])
+            self.assertTrue(any("sent" in r for r in results))
+            # http:// must be flagged as cleartext
+            self.assertTrue(any("not HTTPS" in r for r in results))
+            time.sleep(0.2)
+            body = received.get("body", {})
+            self.assertEqual(body.get("level"), "CRITICAL")
+            self.assertEqual(body.get("score"), 120)
+            self.assertIn("GreyRun ransomware alert", body.get("text", ""))
+        finally:
+            srv.server_close()
 
 
 class TestServiceAutostart(unittest.TestCase):

@@ -120,10 +120,17 @@ def channels_configured(config: Config) -> List[str]:
 
 
 def dispatch(config: Config, assessment: Assessment, actions: Optional[List[str]] = None) -> List[str]:
-    """Send to every configured channel. Returns human-readable results."""
+    """Send to every configured channel. Returns human-readable results.
+
+    Note: the payload includes this host's name and absolute file paths from
+    the affected directories, so only point webhook_url/SMTP at endpoints you
+    trust. A non-HTTPS webhook sends that data in cleartext and is flagged.
+    """
     results: List[str] = []
     url = _webhook_url(config)
     if url:
+        if not url.lower().startswith("https://"):
+            results.append("WARNING: webhook is not HTTPS — alert sent in cleartext")
         ok = send_webhook(url, assessment, actions)
         results.append("webhook alert sent" if ok else "webhook alert FAILED")
     if config.smtp_host and config.smtp_from and config.smtp_to:

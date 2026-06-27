@@ -171,9 +171,17 @@ def restore_batch(paths: Paths, batch_id: str, overwrite: bool = False) -> Optio
     with open(os.path.join(batch_dir, "manifest.json"), "r", encoding="utf-8") as fh:
         manifest = json.load(fh)
     restored = skipped = failed = 0
+    files_root = os.path.join(batch_dir, "files")
     for entry in manifest.get("files", []):
-        stored = os.path.join(batch_dir, "files", entry["stored"])
-        target = entry["original"]
+        # Untrusted manifest: keep 'stored' inside the batch and refuse a
+        # traversal/relative 'original' (write-anywhere guard).
+        stored_name = os.path.basename(entry.get("stored", ""))
+        stored = os.path.join(files_root, stored_name)
+        raw_original = str(entry.get("original", ""))
+        target = utils.normpath(raw_original)
+        if not os.path.isabs(raw_original) or ".." in raw_original.replace("\\", "/").split("/"):
+            failed += 1
+            continue
         if not os.path.exists(stored):
             failed += 1
             continue

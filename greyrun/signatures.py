@@ -26,11 +26,14 @@ RANSOMWARE_EXTENSIONS = {
     ".enc": "generic-crypter", ".crinf": "DXXD", ".r5a": "7ev3n",
     ".xtbl": "Shade", ".xrtn": "Shade", ".ytbl": "Shade",
     ".ccc": "TeslaCrypt", ".vvv": "TeslaCrypt", ".ecc": "TeslaCrypt",
-    ".exx": "TeslaCrypt", ".micro": "TeslaCrypt", ".mp3": "TeslaCrypt-v4?",
+    ".exx": "TeslaCrypt", ".micro": "TeslaCrypt",
+    # NB: deliberately NOT including ".mp3"/".java" etc. Some ransomware reuses
+    # common extensions, but flagging every music/Java file is a worse failure
+    # for a defensive tool than missing those rare variants.
     ".vault": "VaultCrypt", ".petya": "Petya", ".cryptowall": "CryptoWall",
     ".sage": "Sage", ".purge": "Globe", ".globe": "Globe",
-    ".dharma": "Dharma", ".wallet": "Dharma", ".onion": "Dharma",
-    ".java": "Dharma", ".combo": "Dharma", ".gamma": "Dharma",
+    ".dharma": "Dharma", ".onion": "Dharma",
+    ".combo": "Dharma", ".gamma": "Dharma",
     ".phobos": "Phobos", ".eking": "Phobos", ".eight": "Phobos",
     ".devos": "Phobos", ".elbie": "Phobos",
     ".makop": "Makop", ".mkp": "Makop",
