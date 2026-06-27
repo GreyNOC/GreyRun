@@ -28,6 +28,7 @@ full = ["psutil>=5.9", "watchdog>=2.1"]
 
 [project.scripts]
 greyrun = "greyrun.cli:main"
+gr = "greyrun.cli:main"
 
 [tool.setuptools]
 packages = ["greyrun"]

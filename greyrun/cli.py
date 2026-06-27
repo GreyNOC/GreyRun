@@ -373,15 +373,26 @@ def cmd_autostart(args, config: Config, paths: Paths) -> int:
     if sub == "status":
         console.info(f"Autostart: {service.status()}")
         return 0
+    if sub == "disable":
+        for ok, msg in service.uninstall_all():
+            (console.ok if ok else console.warn)(msg)
+        return 0
     if sub == "enable":
         if not _require_paths(config):
             return 1
-        ok, msg = service.install(config, paths)
+        method = args.method or ("task" if service.is_admin() else "startup")
+        if method == "task":
+            ok, msg = service.install_task(config, paths)
+            if not ok and not service.is_admin() and not args.method:
+                console.warn(msg)
+                console.info("Falling back to no-admin Startup-folder autostart…")
+                ok, msg = service.install_startup(config, paths)
+        else:
+            ok, msg = service.install_startup(config, paths)
         (console.ok if ok else console.warn)(msg)
-        return 0 if ok else 1
-    if sub == "disable":
-        ok, msg = service.uninstall()
-        (console.ok if ok else console.warn)(msg)
+        if ok and method == "startup":
+            console.info("Tip: for elevated autostart (can stop attacker processes it "
+                         "doesn't own), run from an Admin shell: greyrun autostart enable --method task")
         return 0 if ok else 1
     return 0
 
@@ -632,8 +643,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("autostart", help="Run the monitor automatically at logon (Windows)")
     asub = sp.add_subparsers(dest="autostart_cmd")
-    asub.add_parser("enable", help="Install the logon autostart task")
-    asub.add_parser("disable", help="Remove the autostart task")
+    a_en = asub.add_parser("enable", help="Install logon autostart (task if admin, else startup folder)")
+    a_en.add_argument("--method", choices=("task", "startup"), help="Force a specific method")
+    asub.add_parser("disable", help="Remove all autostart entries")
     asub.add_parser("status", help="Show autostart status")
     sp.set_defaults(func=cmd_autostart)
 

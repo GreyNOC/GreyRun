@@ -51,6 +51,15 @@ pip install -r requirements.txt        # recommended
 pip install -e ".[full]"
 ```
 
+After installing, two commands are registered — the full `greyrun` and the
+short **`gr`**:
+
+```bash
+gr status
+gr monitor
+gr scan
+```
+
 You can also run it without installing, from this folder:
 
 ```bash
