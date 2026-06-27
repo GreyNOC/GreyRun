@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "greyrun"
+version = "1.0.0"
+description = "GreyRun — behaviour-based ransomware shield (defensive CLI)"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+keywords = ["ransomware", "security", "defense", "edr", "canary", "honeypot", "entropy"]
+classifiers = [
+  "Environment :: Console",
+  "Intended Audience :: System Administrators",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: POSIX",
+  "Programming Language :: Python :: 3",
+  "Topic :: Security",
+]
+
+# Core runs on the standard library alone. The extras unlock the strongest
+# capabilities: efficient OS file-system events and process-level response.
+dependencies = []
+
+[project.optional-dependencies]
+full = ["psutil>=5.9", "watchdog>=2.1"]
+
+[project.scripts]
+greyrun = "greyrun.cli:main"
+
+[tool.setuptools]
+packages = ["greyrun"]

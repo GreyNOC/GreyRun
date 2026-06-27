@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# GreyRun runtime state (never commit protection state / forensics)
+.greyrun/
+*.greyrun_sandbox
+greyrun_sandbox/
