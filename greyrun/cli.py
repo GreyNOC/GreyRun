@@ -359,7 +359,7 @@ def cmd_quarantine(args, config: Config, paths: Paths) -> int:
     ):
         console.info("Aborted. Nothing moved.")
         return 0
-    result = quarantine_mod.quarantine_files(paths, items)
+    result = quarantine_mod.quarantine_files(paths, items, roots=config.watched_paths)
     console.ok(f"Quarantined {result.moved} file(s) into batch {result.batch_id} "
                f"({result.failed} failed)")
     console.info("Undo with:  greyrun quarantine restore latest")

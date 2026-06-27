@@ -66,7 +66,7 @@ RANSOM_NOTE_NAMES = {
     "_readme.txt", "restore_files.txt", "restore-my-files.txt",
     "recover_files.txt", "recovery_key.txt", "your_files_are_encrypted.txt",
     "your_files_are_encrypted.html", "decrypt-files.txt", "unlock_files.txt",
-    "ransom_note.txt", "attention.txt", "important.txt",
+    "ransom_note.txt",  # NB: not "important.txt"/"attention.txt" -- too common benign
     "lockbit_readme.txt", "restore-my-files.txt", "conti_readme.txt",
     "+how_to_decrypt.txt", "!!!readme!!!.txt", "!!!_recovery_!!!.txt",
 }

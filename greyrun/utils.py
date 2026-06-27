@@ -65,11 +65,17 @@ def same_path(a: str, b: str) -> bool:
 
 
 def is_within(path: str, roots: Sequence[str]) -> bool:
-    """True if ``path`` is equal to or inside any of ``roots``."""
+    """True if ``path`` is equal to or inside any of ``roots``.
+
+    The root's trailing separator is stripped before comparison so a drive
+    root (``C:\\``) or filesystem root (``/``) -- the one path ``normpath``
+    keeps a trailing separator on -- still contains its children. Without this
+    a whole-drive watch would match nothing and silently disable detection.
+    """
     target = _fold(path)
     for root in roots:
-        r = _fold(root)
-        if target == r:
+        r = _fold(root).rstrip(os.sep)  # 'c:\\' -> 'c:', '/' -> ''
+        if target == r or target == r + os.sep:
             return True
         if target.startswith(r + os.sep):
             return True

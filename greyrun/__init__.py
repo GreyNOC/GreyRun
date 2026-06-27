@@ -12,7 +12,7 @@ process-level response) and ``watchdog`` (for efficient file-system events)
 when they are installed.
 """
 
-__version__ = "1.1.1"
+__version__ = "1.1.2"
 __app_name__ = "GreyRun"
 __tagline__ = "Behaviour-based ransomware shield"
 

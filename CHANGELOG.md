@@ -3,6 +3,33 @@
 All notable changes to GreyRun are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.1.2] — 2026-06-27
+
+A second review pass found and fixed real bugs the earlier reviews missed.
+
+### Security
+- **Quarantine restore** now refuses to write outside the recorded watched
+  roots, closing a write-anywhere primitive driven by a tampered manifest
+  (matches the existing `backup` restore guard).
+- Webhook **SSRF guard** broadened to block reserved/multicast/unspecified
+  addresses as well as the link-local cloud-metadata address.
+- Process response **fails closed**: it will not suspend/terminate a PID whose
+  start time or owner can't be verified at action time.
+
+### Fixed
+- `is_within` now correctly contains the children of a drive/filesystem root
+  (`C:\` or `/`). Previously, protecting a whole drive silently disabled
+  detection, auto-containment, and restore for that drive.
+- Removed `important.txt`/`attention.txt` from the ransom-note name list — too
+  common as benign filenames.
+
+### Changed
+- The responder runs its slow work (suspect scan, suspend, lockdown/quarantine)
+  outside its lock, so a CRITICAL response is never serialized behind a slower
+  in-flight DEFEND pass.
+- Tests: +4 (quarantine out-of-root restore, filesystem-root containment,
+  fail-closed response, ransom-note false positive). 37 passing.
+
 ## [1.1.1] — 2026-06-27
 
 ### Fixed
@@ -58,6 +85,7 @@ Initial release.
 - Safe, sandboxed attack simulator for drills.
 - `gr` short CLI alias and `exclude` command for skipping noisy folders.
 
+[1.1.2]: https://github.com/GreyNOC/GreyRun/releases/tag/v1.1.2
 [1.1.1]: https://github.com/GreyNOC/GreyRun/releases/tag/v1.1.1
 [1.1.0]: https://github.com/GreyNOC/GreyRun/releases/tag/v1.1.0
 [1.0.0]: https://github.com/GreyNOC/GreyRun/releases/tag/v1.0.0

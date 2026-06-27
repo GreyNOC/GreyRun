@@ -64,18 +64,26 @@ def build_summary(assessment: Assessment, actions: Optional[List[str]] = None) -
     return "\n".join(lines)
 
 
-def _is_link_local(host: str) -> bool:
-    """True if the host is (or resolves to) a link-local address (the cloud
-    metadata SSRF target, 169.254.169.254 / fe80::). Best-effort."""
+def _addr_blocked(ip: "ipaddress._BaseAddress") -> bool:
+    # Block addresses that are never a legitimate webhook target. Loopback and
+    # private ranges are deliberately allowed: self-hosted / internal webhooks
+    # (Mattermost, Rocket.Chat, an internal relay) are a real use case.
+    return ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified
+
+
+def _is_blocked_host(host: str) -> bool:
+    """True if the host is (or resolves to) a non-routable SSRF target: the
+    cloud-metadata link-local address (169.254.169.254 / fe80::), or a
+    reserved/multicast/unspecified address. Best-effort."""
     if not host:
-        return False
+        return True
     try:
-        return ipaddress.ip_address(host).is_link_local
+        return _addr_blocked(ipaddress.ip_address(host))
     except ValueError:
         pass
     try:
         for res in socket.getaddrinfo(host, None):
-            if ipaddress.ip_address(res[4][0]).is_link_local:
+            if _addr_blocked(ipaddress.ip_address(res[4][0])):
                 return True
     except Exception:
         return False
@@ -83,11 +91,11 @@ def _is_link_local(host: str) -> bool:
 
 
 def send_webhook(url: str, assessment: Assessment, actions: Optional[List[str]], timeout: float = 6.0) -> bool:
-    # Refuse link-local destinations (e.g. 169.254.169.254 cloud metadata) so a
-    # tampered config can't turn alerting into an SSRF/credential-theft vector.
+    # Refuse non-routable destinations (e.g. 169.254.169.254 cloud metadata) so
+    # a tampered config can't turn alerting into an SSRF/credential-theft vector.
     host = urlparse(url).hostname or ""
-    if _is_link_local(host):
-        console.audit("webhook_blocked", reason="link-local address", host=host)
+    if _is_blocked_host(host):
+        console.audit("webhook_blocked", reason="non-routable address", host=host)
         return False
     summary = build_summary(assessment, actions)
     payload = {

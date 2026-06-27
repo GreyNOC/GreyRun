@@ -70,12 +70,14 @@ class QuarantineResult:
     manifest: Optional[str]
 
 
-def quarantine_files(paths: Paths, items: List[tuple]) -> QuarantineResult:
+def quarantine_files(paths: Paths, items: List[tuple],
+                     roots: Optional[List[str]] = None) -> QuarantineResult:
     """Move ``(path, reason)`` items into a new quarantine batch.
 
     Files are stored under ``vault/../quarantine/<batch>/files`` with a manifest
     mapping the stored copy back to its original location. Moved files are made
-    read-only so a surviving process cannot keep using them.
+    read-only so a surviving process cannot keep using them. ``roots`` (the
+    watched paths) is recorded so restore can refuse to write outside them.
     """
     batch_id = utils.iso().replace(":", "").replace("-", "").replace("+0000", "Z")
     batch_dir = os.path.join(paths.quarantine, batch_id)
@@ -106,7 +108,12 @@ def quarantine_files(paths: Paths, items: List[tuple]) -> QuarantineResult:
         manifest_path = os.path.join(batch_dir, "manifest.json")
         with open(manifest_path, "w", encoding="utf-8") as fh:
             json.dump(
-                {"id": batch_id, "created": utils.iso(), "files": manifest_entries},
+                {
+                    "id": batch_id,
+                    "created": utils.iso(),
+                    "roots": [utils.normpath(r) for r in (roots or [])],
+                    "files": manifest_entries,
+                },
                 fh, indent=2,
             )
     return QuarantineResult(batch_id, moved, failed, manifest_path)
@@ -172,15 +179,20 @@ def restore_batch(paths: Paths, batch_id: str, overwrite: bool = False) -> Optio
         manifest = json.load(fh)
     restored = skipped = failed = 0
     files_root = os.path.join(batch_dir, "files")
+    roots = [utils.normpath(r) for r in manifest.get("roots", [])]
     for entry in manifest.get("files", []):
-        # Untrusted manifest: keep 'stored' inside the batch and refuse a
-        # traversal/relative 'original' (write-anywhere guard).
+        # Untrusted manifest: keep 'stored' inside the batch, refuse a
+        # traversal/relative 'original', and refuse any destination outside the
+        # recorded watched roots (write-anywhere guard).
         stored_name = os.path.basename(entry.get("stored", ""))
         stored = os.path.join(files_root, stored_name)
         raw_original = str(entry.get("original", ""))
         target = utils.normpath(raw_original)
         if not os.path.isabs(raw_original) or ".." in raw_original.replace("\\", "/").split("/"):
             failed += 1
+            continue
+        if roots and not utils.is_within(target, roots):
+            failed += 1  # outside the recorded watched roots -> refuse
             continue
         if not os.path.exists(stored):
             failed += 1

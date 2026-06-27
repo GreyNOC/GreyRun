@@ -89,19 +89,21 @@ def _block_reason(suspect: "Suspect", current_user: Optional[str]) -> Optional[s
         p = psutil.Process(suspect.pid)
     except Exception:
         return "process already gone"
-    if suspect.create_time:
-        try:
-            if abs(p.create_time() - suspect.create_time) > 1.0:
-                return "PID reused (start-time mismatch)"
-        except Exception:
-            return "cannot verify process identity"
+    # Fail closed: if identity can't be confirmed, do not act on the PID.
+    if not suspect.create_time:
+        return "cannot verify process start time"
+    try:
+        if abs(p.create_time() - suspect.create_time) > 1.0:
+            return "PID reused (start-time mismatch)"
+    except Exception:
+        return "cannot verify process identity"
     if current_user:
         try:
             owner = p.username()
-            if owner and owner != current_user:
-                return f"owned by {owner}, not current user"
         except Exception:
-            pass
+            return "cannot verify process owner"
+        if owner and owner != current_user:
+            return f"owned by {owner}, not current user"
     return None
 
 
@@ -470,52 +472,61 @@ class Responder:
         return actions
 
     def handle(self, assessment: Assessment) -> List[str]:
-        """React to an assessment. Returns a list of human-readable actions."""
+        """React to an assessment. Returns a list of human-readable actions.
+
+        Only the small alert/forensics bookkeeping is done under the lock; the
+        slow work (suspect scan, suspend/terminate, lockdown/quarantine) runs
+        unlocked so a CRITICAL response is never serialized behind a slow DEFEND
+        pass during an active sweep."""
         actions: List[str] = []
         mode = self.config.response_mode
         level = assessment.level
 
+        # Quick, lock-guarded decision: fire the one-shot alert at most once per
+        # escalation bucket.
+        fire_alert = False
         with self._lock:
             if level == ALERT and self._alerted_level != ALERT:
                 self._alerted_level = ALERT
-                self._fire_alert(assessment, actions)
+                fire_alert = True
+            elif level in (DEFEND, CRITICAL) and self._alerted_level not in (DEFEND, CRITICAL):
+                self._alerted_level = level
+                fire_alert = True
+        if fire_alert:
+            self._fire_alert(assessment, actions)
 
-            if level in (DEFEND, CRITICAL):
-                if self._alerted_level not in (DEFEND, CRITICAL):
-                    self._fire_alert(assessment, actions)
-                    self._alerted_level = level
+        # ALERT (and anything below DEFEND), plus "monitor" mode, are alert-only.
+        if level in (DEFEND, CRITICAL) and mode != "monitor":
+            suspects = identify_suspects(self.config)
 
-                # "monitor" mode is strictly observe-and-alert: no process
-                # control, no file changes. All containment requires defend/kill.
-                if mode == "monitor":
-                    return actions
+            with self._lock:
+                need_forensics = self.incident_file is None
+            if need_forensics:
+                incident = capture_forensics(self.paths, suspects, assessment)
+                with self._lock:
+                    if self.incident_file is None:
+                        self.incident_file = incident
+                if incident:
+                    actions.append(f"forensics captured -> {incident}")
 
-                suspects = identify_suspects(self.config)
-                if self.incident_file is None:
-                    self.incident_file = capture_forensics(
-                        self.paths, suspects, assessment
-                    )
-                    if self.incident_file:
-                        actions.append(f"forensics captured -> {self.incident_file}")
+            # If no process is caught holding an open handle (encrypters often
+            # hold each file open only briefly), report busy processes for
+            # review but do not auto-contain on weak evidence.
+            if suspects and not any(s.actionable for s in suspects):
+                review = ", ".join(f"{s.name}(pid {s.pid})" for s in suspects[:3])
+                actions.append(f"no process caught with open protected-file "
+                               f"handles; for review: {review}")
 
-                # If no process is caught holding an open handle (encrypters
-                # often hold each file open only briefly), report busy
-                # processes for review but do not auto-contain on weak evidence.
-                if suspects and not any(s.actionable for s in suspects):
-                    review = ", ".join(f"{s.name}(pid {s.pid})" for s in suspects[:3])
-                    actions.append(f"no process caught with open protected-file "
-                                   f"handles; for review: {review}")
+            actions += self._suspend(suspects)  # defend and kill both suspend
 
-                actions += self._suspend(suspects)  # defend and kill both suspend
+            if level == CRITICAL:
+                if mode == "kill":
+                    actions += self._terminate(suspects)
+                if self.config.auto_lockdown:
+                    actions += self._contain(assessment)
 
-                if level == CRITICAL:
-                    if mode == "kill":
-                        actions += self._terminate(suspects)
-                    if self.config.auto_lockdown:
-                        actions += self._contain(assessment)
-
-            for a in actions:
-                console.audit("response", action=a, level=level, score=assessment.score)
+        for a in actions:
+            console.audit("response", action=a, level=level, score=assessment.score)
         return actions
 
     def _contain(self, assessment: Assessment) -> List[str]:
@@ -537,7 +548,8 @@ class Responder:
             scope = Config(watched_paths=dirs, exclude_dirs=self.config.exclude_dirs)
             items = quarantine_mod.find_artifacts(scope)
             if items:
-                res = quarantine_mod.quarantine_files(self.paths, items)
+                res = quarantine_mod.quarantine_files(
+                    self.paths, items, roots=self.config.watched_paths)
                 actions.append(f"quarantined {res.moved} artifact(s) -> batch {res.batch_id}")
                 console.audit("quarantine", batch=res.batch_id, moved=res.moved)
         return actions

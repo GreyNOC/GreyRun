@@ -376,6 +376,54 @@ class TestSecurityHardening(unittest.TestCase):
         self.assertEqual(result.failed, 1)
         self.assertFalse(os.path.exists(os.path.join(root, "escape.txt")))
 
+    def test_quarantine_restore_refuses_out_of_root(self):
+        paths, root = _tmp_paths()
+        watched = os.path.join(root, "docs")
+        utils.ensure_dir(watched)
+        locked = os.path.join(watched, "report.docx.locked")
+        with open(locked, "wb") as fh:
+            fh.write(b"encrypted")
+        res = quarantine.quarantine_files(paths, [(locked, "ext")], roots=[watched])
+        self.assertEqual(res.moved, 1)
+
+        # Tamper the manifest to point at an absolute path outside the roots.
+        batch_dir = os.path.join(paths.quarantine, res.batch_id)
+        mpath = os.path.join(batch_dir, "manifest.json")
+        with open(mpath) as fh:
+            m = json.load(fh)
+        evil = os.path.join(root, "ESCAPE", "pwned.txt")
+        m["files"][0]["original"] = evil
+        with open(mpath, "w") as fh:
+            json.dump(m, fh)
+
+        result = quarantine.restore_batch(paths, "latest", overwrite=True)
+        self.assertEqual(result.restored, 0)     # out-of-root write refused
+        self.assertFalse(os.path.exists(evil))
+
+    def test_is_within_filesystem_root(self):
+        # A whole-drive / filesystem-root watch must still contain its children.
+        if os.name == "nt":
+            self.assertTrue(utils.is_within(r"C:\Users\x\f.txt", ["C:\\"]))
+            self.assertFalse(utils.is_within(r"D:\x\f.txt", ["C:\\"]))
+        else:
+            self.assertTrue(utils.is_within("/home/x/f.txt", ["/"]))
+        base = tempfile.mkdtemp(prefix="grwin_")
+        self.assertTrue(utils.is_within(os.path.join(base, "a", "b.txt"), [base]))
+        self.assertFalse(utils.is_within(base + "_sibling", [base]))
+
+    def test_block_reason_fails_closed_without_start_time(self):
+        import greyrun.responder as R
+
+        if R.psutil is None:
+            self.skipTest("psutil not installed")
+        # A live PID we can't verify (create_time=0) must be refused, not acted on.
+        s = R.Suspect(pid=os.getpid(), name="probe.exe", score=1,
+                      actionable=True, create_time=0.0)
+        self.assertIsNotNone(R._block_reason(s, None))
+
+    def test_important_txt_not_flagged_as_note(self):
+        self.assertFalse(is_ransom_note("important.txt"))
+
 
 class TestMonitorRouting(unittest.TestCase):
     def test_ignore_logic(self):
