@@ -1,5 +1,10 @@
 # GreyRun — behaviour-based ransomware shield
 
+[![CI](https://github.com/GreyNOC/GreyRun/actions/workflows/ci.yml/badge.svg)](https://github.com/GreyNOC/GreyRun/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/GreyNOC/GreyRun)](https://github.com/GreyNOC/GreyRun/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/)
+
 GreyRun is a defensive command-line tool that **detects, contains and helps you
 recover from ransomware** by watching your important folders for the *behaviour*
 of an encryption attack rather than relying on a virus signature for a specific

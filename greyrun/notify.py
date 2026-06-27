@@ -16,6 +16,7 @@ take down the monitor.
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
 import smtplib
@@ -24,6 +25,7 @@ import ssl
 import urllib.request
 from email.message import EmailMessage
 from typing import List, Optional
+from urllib.parse import urlparse
 
 from . import console
 from .config import Config
@@ -64,7 +66,31 @@ def build_summary(assessment: Assessment, actions: Optional[List[str]] = None) -
     return "\n".join(lines)
 
 
+def _is_link_local(host: str) -> bool:
+    """True if the host is (or resolves to) a link-local address — the cloud
+    metadata SSRF target (169.254.169.254 / fe80::). Best-effort."""
+    if not host:
+        return False
+    try:
+        return ipaddress.ip_address(host).is_link_local
+    except ValueError:
+        pass
+    try:
+        for res in socket.getaddrinfo(host, None):
+            if ipaddress.ip_address(res[4][0]).is_link_local:
+                return True
+    except Exception:
+        return False
+    return False
+
+
 def send_webhook(url: str, assessment: Assessment, actions: Optional[List[str]], timeout: float = 6.0) -> bool:
+    # Refuse link-local destinations (e.g. 169.254.169.254 cloud metadata) so a
+    # tampered config can't turn alerting into an SSRF/credential-theft vector.
+    host = urlparse(url).hostname or ""
+    if _is_link_local(host):
+        console.audit("webhook_blocked", reason="link-local address", host=host)
+        return False
     summary = build_summary(assessment, actions)
     payload = {
         "text": summary,                  # Slack/Discord/Teams compatible

@@ -424,6 +424,10 @@ def cmd_recover(args, config: Config, paths: Paths) -> int:
     """Post-incident recovery: resume suspended processes and lift the lockdown."""
     resumed = responder_mod.resume_suspended(paths)
     unlocked = responder_mod.unlock(paths)
+    if unlocked < 0:
+        console.warn("Lockdown state file is corrupt — could not auto-revert read-only flags.")
+        console.info('Clear them manually, e.g.:  attrib -r /s "C:\\path\\to\\protected\\*"')
+        unlocked = 0
     console.ok(f"Recovery complete: resumed {resumed} process(es), "
                f"unlocked {unlocked} file(s).")
     if resumed == 0 and unlocked == 0:

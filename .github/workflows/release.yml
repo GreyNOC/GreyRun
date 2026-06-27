@@ -1,0 +1,51 @@
+name: Release
+
+# Builds distribution artifacts on every version tag and (optionally) publishes
+# them to PyPI via Trusted Publishing. PyPI publishing is gated on a repository
+# variable so the pipeline stays green until you opt in:
+#
+#   1. On PyPI, add a Trusted Publisher for this repo
+#      (project: greyrun, workflow: release.yml, environment: pypi).
+#   2. In GitHub repo settings, create an environment named "pypi" and set the
+#      repository variable PUBLISH_PYPI = true.
+#
+# Until then, the build job still runs and validates the package on each tag.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build sdist + wheel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build
+        run: |
+          python -m pip install --upgrade build twine
+          python -m build
+          python -m twine check dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  pypi:
+    name: Publish to PyPI (Trusted Publishing)
+    needs: build
+    if: ${{ startsWith(github.ref, 'refs/tags/v') && vars.PUBLISH_PYPI == 'true' }}
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write   # OIDC token for Trusted Publishing — no API token needed
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1

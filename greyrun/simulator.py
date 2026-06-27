@@ -120,9 +120,15 @@ def simulate_attack(
     ]
 
     encrypted = 0
+    real_root = os.path.realpath(root)
     for path in targets:
-        # Re-verify on every iteration -- defence in depth.
-        if not utils.is_within(path, [root]) or not os.path.exists(
+        # Re-verify on every iteration -- defence in depth. Resolve symlinks
+        # (realpath) so a reparse point can't redirect a write outside the box.
+        try:
+            real_path = os.path.realpath(path)
+        except OSError:
+            continue
+        if not utils.is_within(real_path, [real_root]) or not os.path.exists(
             os.path.join(root, MARKER)
         ):
             break

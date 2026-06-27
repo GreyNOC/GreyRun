@@ -60,10 +60,51 @@ class Suspect:
     # that merely look busy (high write I/O elsewhere) are reported but never
     # auto-contained, so GreyRun won't suspend an innocent browser or backup job.
     actionable: bool = False
+    # Process start time, captured at identification, used to detect PID reuse
+    # before we suspend/terminate (so we never act on a recycled PID).
+    create_time: float = 0.0
 
 
 def available() -> bool:
     return psutil is not None
+
+
+def _current_username() -> Optional[str]:
+    if psutil is None:
+        return None
+    try:
+        return psutil.Process(os.getpid()).username()
+    except Exception:
+        return None
+
+
+def _block_reason(suspect: "Suspect", current_user: Optional[str]) -> Optional[str]:
+    """Re-validate a suspect immediately before acting. Returns a reason GreyRun
+    must NOT act (PID reused, critical process, owned by another user), else
+    ``None``. Defends against PID reuse between identification and action and
+    refuses to touch other users'/SYSTEM-owned processes."""
+    if psutil is None:
+        return "no process control"
+    if suspect.name.lower() in CRITICAL_PROCS:
+        return "critical OS process"
+    try:
+        p = psutil.Process(suspect.pid)
+    except Exception:
+        return "process already gone"
+    if suspect.create_time:
+        try:
+            if abs(p.create_time() - suspect.create_time) > 1.0:
+                return "PID reused (start-time mismatch)"
+        except Exception:
+            return "cannot verify process identity"
+    if current_user:
+        try:
+            owner = p.username()
+            if owner and owner != current_user:
+                return f"owned by {owner}, not current user"
+        except Exception:
+            pass
+    return None
 
 
 # --------------------------------------------------------------------------- #
@@ -138,6 +179,10 @@ def identify_suspects(config: Config, limit: int = 5, confirm_top: int = 12) -> 
             info = proc.as_dict(["name", "username", "exe"])
         except Exception:
             info = {}
+        try:
+            ctime = proc.create_time()
+        except Exception:
+            ctime = 0.0
         suspects.append(
             Suspect(
                 pid=proc.pid,
@@ -148,6 +193,7 @@ def identify_suspects(config: Config, limit: int = 5, confirm_top: int = 12) -> 
                 username=info.get("username") or "",
                 exe=info.get("exe") or "",
                 actionable=actionable,
+                create_time=ctime,
             )
         )
 
@@ -196,16 +242,27 @@ def _set_readonly(path: str, on: bool) -> bool:
         return False
 
 
-def lockdown(paths: Paths, target_dirs: List[str]) -> int:
-    """Mark every file under ``target_dirs`` read-only. Returns file count.
+LOCKDOWN_MAX_FILES = 20000  # safety cap so a stray trigger can't lock a whole disk
+
+
+def lockdown(paths: Paths, target_dirs: List[str], max_files: int = LOCKDOWN_MAX_FILES) -> int:
+    """Mark files under ``target_dirs`` read-only (capped). Returns file count.
     The set of locked files is recorded so :func:`unlock` can revert it."""
     locked: List[str] = []
+    capped = False
     for d in target_dirs:
         d = utils.normpath(d)
         base = d if os.path.isdir(d) else os.path.dirname(d)
         for f in utils.iter_files([base]):
+            if len(locked) >= max_files:
+                capped = True
+                break
             if _set_readonly(f, True):
                 locked.append(f)
+        if capped:
+            break
+    if capped:
+        console.audit("lockdown_capped", limit=max_files, dirs=target_dirs)
     if locked:
         paths.ensure()
         state_file = os.path.join(paths.root, "lock_state.json")
@@ -270,15 +327,20 @@ def resume_suspended(paths: Paths) -> int:
 
 
 def unlock(paths: Paths) -> int:
-    """Revert a previous lockdown."""
+    """Revert a previous lockdown. Returns the number of files made writable
+    again, or -1 if the lock-state file exists but is unreadable/corrupt (so
+    the caller can warn the user to clear read-only manually)."""
     state_file = os.path.join(paths.root, "lock_state.json")
     if not os.path.exists(state_file):
         return 0
     try:
         with open(state_file, "r", encoding="utf-8") as fh:
             locked = json.load(fh)
+        if not isinstance(locked, list):
+            raise ValueError("lock state is not a list")
     except Exception:
-        return 0
+        console.audit("unlock_corrupt", state_file=state_file)
+        return -1
     count = 0
     for f in locked:
         if _set_readonly(f, False):
@@ -360,10 +422,15 @@ class Responder:
         actions = []
         if psutil is None:
             return actions
+        current_user = _current_username()
         for s in suspects:
             if not s.actionable:  # never suspend on weak (I/O-only) evidence
                 continue
-            if s.pid in self._suspended or s.name.lower() in CRITICAL_PROCS:
+            if s.pid in self._suspended:
+                continue
+            block = _block_reason(s, current_user)
+            if block:
+                actions.append(f"skipped {s.name} (pid {s.pid}): {block}")
                 continue
             try:
                 psutil.Process(s.pid).suspend()
@@ -380,10 +447,15 @@ class Responder:
         if psutil is None:
             return actions
         grace = self.config.kill_grace_seconds
+        current_user = _current_username()
         for s in suspects:
             if not s.actionable:  # never terminate on weak (I/O-only) evidence
                 continue
-            if s.pid in self._killed or s.name.lower() in CRITICAL_PROCS:
+            if s.pid in self._killed:
+                continue
+            block = _block_reason(s, current_user)
+            if block:
+                actions.append(f"skipped {s.name} (pid {s.pid}): {block}")
                 continue
             try:
                 p = psutil.Process(s.pid)
@@ -485,8 +557,17 @@ class Responder:
         actions.append("raised desktop + console alert")
 
         # Off-box notifications for real incidents only (DEFEND/CRITICAL).
-        if assessment.level in (DEFEND, CRITICAL):
-            from . import notify
+        # Sent on a background thread so a slow webhook/SMTP never stalls the
+        # containment response (suspend/lockdown must not wait on the network).
+        from . import notify
 
-            for result in notify.dispatch(self.config, assessment, actions):
-                actions.append(result)
+        if assessment.level in (DEFEND, CRITICAL) and notify.channels_configured(self.config):
+            asmt, acts = assessment, list(actions)
+
+            def _send():
+                for result in notify.dispatch(self.config, asmt, acts):
+                    console.audit("notify", result=result)
+                    console.emit("info", "ALERT: " + result)
+
+            threading.Thread(target=_send, daemon=True).start()
+            actions.append("off-box alert(s) dispatching")

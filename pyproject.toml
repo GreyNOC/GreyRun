@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "greyrun"
-version = "1.0.0"
+version = "1.1.0"
 description = "GreyRun — behaviour-based ransomware shield (defensive CLI)"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -26,9 +26,16 @@ dependencies = []
 [project.optional-dependencies]
 full = ["psutil>=5.9", "watchdog>=2.1"]
 
+[project.urls]
+Homepage = "https://github.com/GreyNOC/GreyRun"
+Repository = "https://github.com/GreyNOC/GreyRun"
+Issues = "https://github.com/GreyNOC/GreyRun/issues"
+Changelog = "https://github.com/GreyNOC/GreyRun/blob/main/CHANGELOG.md"
+
 [project.scripts]
 greyrun = "greyrun.cli:main"
 gr = "greyrun.cli:main"
 
-[tool.setuptools]
-packages = ["greyrun"]
+[tool.setuptools.packages.find]
+include = ["greyrun*"]
+exclude = ["tests*"]

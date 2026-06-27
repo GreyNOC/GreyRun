@@ -111,7 +111,14 @@ class Config:
             return cls()
         known = {f for f in cls().__dataclass_fields__}  # type: ignore[attr-defined]
         clean = {k: v for k, v in data.items() if k in known}
-        return cls(**clean)
+        cfg = cls(**clean)
+        # Validate enums on load so a hand-edited config can't smuggle an
+        # invalid policy past the `set` command's checks.
+        if cfg.response_mode not in ("monitor", "defend", "kill"):
+            cfg.response_mode = "defend"
+        if cfg.containment not in ("lockdown", "quarantine", "both"):
+            cfg.containment = "lockdown"
+        return cfg
 
     def save(self, paths: Paths) -> None:
         paths.ensure()
