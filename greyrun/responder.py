@@ -19,7 +19,7 @@ import json
 import os
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import List, Optional
 
 from . import console, utils
@@ -359,7 +359,21 @@ def unlock(paths: Paths) -> int:
 
 def capture_forensics(paths: Paths, suspects: List[Suspect], assessment: Assessment) -> Optional[str]:
     utils.ensure_dir(paths.forensics)
-    stamp = utils.iso().replace(":", "").replace("-", "")
+
+    def _claim(candidate: str) -> bool:
+        try:
+            # O_EXCL create: a same-second incident must not overwrite the
+            # previous capture (timestamps have 1s resolution).
+            with open(os.path.join(paths.forensics, f"incident_{candidate}.json"),
+                      "x", encoding="utf-8"):
+                return True
+        except FileExistsError:
+            return False
+
+    try:
+        stamp = utils.claim_unique_id(utils.stamp_id(), _claim)
+    except OSError:
+        return None
     out = os.path.join(paths.forensics, f"incident_{stamp}.json")
     record = {
         "captured": utils.iso(),
@@ -417,6 +431,17 @@ class Responder:
         self._alerted_level: str = ""
         self._lock = threading.Lock()
         self.incident_file: Optional[str] = None
+        self._generation = 0  # bumped by rearm(); see handle()'s forensics latch
+
+    def rearm(self) -> None:
+        """Reset the one-shot alert/forensics guards after a threat has fully
+        decayed, so a later, separate incident in the same monitor run alerts
+        and captures forensics again. PID-level suspend/kill bookkeeping is
+        kept: acting twice on the same PID stays idempotent."""
+        with self._lock:
+            self._alerted_level = ""
+            self.incident_file = None
+            self._generation += 1
 
     def _suspend(self, suspects: List[Suspect]) -> List[str]:
         actions = []
@@ -501,10 +526,14 @@ class Responder:
 
             with self._lock:
                 need_forensics = self.incident_file is None
+                generation = self._generation
             if need_forensics:
                 incident = capture_forensics(self.paths, suspects, assessment)
                 with self._lock:
-                    if self.incident_file is None:
+                    # Don't re-latch the once-per-incident guard if a rearm()
+                    # happened while the capture was in flight -- that would
+                    # silently suppress forensics for the *next* incident.
+                    if self.incident_file is None and self._generation == generation:
                         self.incident_file = incident
                 if incident:
                     actions.append(f"forensics captured -> {incident}")
@@ -545,7 +574,9 @@ class Responder:
         if method in ("quarantine", "both"):
             from . import quarantine as quarantine_mod
 
-            scope = Config(watched_paths=dirs, exclude_dirs=self.config.exclude_dirs)
+            # Full policy copy, narrowed to the hit dirs: field-by-field
+            # copying is how entropy_threshold got silently dropped before.
+            scope = replace(self.config, watched_paths=dirs)
             items = quarantine_mod.find_artifacts(scope)
             if items:
                 res = quarantine_mod.quarantine_files(

@@ -109,8 +109,33 @@ class Config:
                 data = json.load(fh)
         except (OSError, json.JSONDecodeError):
             return cls()
-        known = {f for f in cls().__dataclass_fields__}  # type: ignore[attr-defined]
-        clean = {k: v for k, v in data.items() if k in known}
+        defaults = cls()
+        known = defaults.__dataclass_fields__  # type: ignore[attr-defined]
+        clean = {}
+        for key, value in data.items():
+            if key not in known:
+                continue
+            # Type-check against the field's default so a hand-edited config
+            # (e.g. watched_paths as a string) degrades to the default value
+            # instead of silently breaking scans and monitoring later.
+            default = getattr(defaults, key)
+            if isinstance(default, bool):
+                if isinstance(value, int) and value in (0, 1):
+                    value = bool(value)  # accept hand-edited JSON 0/1
+                elif not isinstance(value, bool):
+                    continue
+            elif isinstance(default, (int, float)):
+                if isinstance(value, bool) or not isinstance(value, (int, float)):
+                    continue
+                value = type(default)(value)
+            elif isinstance(default, str):
+                if not isinstance(value, str):
+                    continue
+            elif isinstance(default, list):
+                if not (isinstance(value, list)
+                        and all(isinstance(item, str) for item in value)):
+                    continue
+            clean[key] = value
         cfg = cls(**clean)
         # Validate enums on load so a hand-edited config can't smuggle an
         # invalid policy past the `set` command's checks.

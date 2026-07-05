@@ -206,8 +206,12 @@ class BehaviorEngine:
                               f"ransomware extension ({fam})")
                 if is_ransom_note(target):
                     self._add(now, W_RANSOM_NOTE, "note", target, "ransom note")
-                elif is_document_class(target) and looks_encrypted(
-                    target, threshold=self.config.entropy_threshold
+                # Check the credited set first: entropy reads up to 256 KB from
+                # disk, and a file being rewritten fires many events.
+                elif (
+                    is_document_class(target)
+                    and ("encrypted", target) not in self._credited
+                    and looks_encrypted(target, threshold=self.config.entropy_threshold)
                 ):
                     self._add(now, W_ENCRYPTED, "encrypted", target,
                               "document looks encrypted")

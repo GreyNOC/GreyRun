@@ -11,7 +11,7 @@ from __future__ import annotations
 import os
 import threading
 import time
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from . import console, utils
 from .config import Config, Paths
@@ -47,7 +47,7 @@ class Monitor:
         self._last_action_ts = 0.0
         self._events = 0
         self._lock = threading.Lock()
-        self._response_inflight_rank = 0  # rank of a response currently running
+        self._inflight_ranks: List[int] = []  # ranks of responses currently running
 
     # event sink shared by both backends
     def _ignore(self, path: str) -> bool:
@@ -92,26 +92,58 @@ class Monitor:
             )
         self._last_score = assessment.score
 
-        # Escalate to the responder on a rising or sustained high level.
+        # Escalate to the responder on a rising or sustained high level. The
+        # guards are read/written under the lock: the heartbeat thread's rearm
+        # check touches the same fields.
         rank = _LEVEL_RANK.get(assessment.level, 0)
         now = utils.now_ts()
-        should_act = rank >= _LEVEL_RANK[ALERT] and (
-            rank > self._last_acted_rank
-            or (rank >= _LEVEL_RANK[DEFEND] and now - self._last_action_ts > 2.0)
-        )
+        with self._lock:
+            should_act = rank >= _LEVEL_RANK[ALERT] and (
+                rank > self._last_acted_rank
+                or (rank >= _LEVEL_RANK[DEFEND] and now - self._last_action_ts > 2.0)
+            )
+            if should_act:
+                self._last_acted_rank = max(self._last_acted_rank, rank)
+                self._last_action_ts = now
         if should_act:
-            self._last_acted_rank = max(self._last_acted_rank, rank)
-            self._last_action_ts = now
             self._dispatch_response(assessment, rank)
+        else:
+            self._maybe_rearm(assessment.score)
+
+    def _maybe_rearm(self, score: int) -> None:
+        """Once a raised threat has fully decayed (score back to 0), re-arm the
+        one-shot alert and escalation guards so the next incident in this
+        monitor run alerts, escalates and captures forensics again."""
+        if score != 0 or self._last_acted_rank == 0:
+            return  # unlocked fast path: benign steady state pays no lock
+        now = utils.now_ts()
+        with self._lock:
+            if self._last_acted_rank == 0:
+                return
+            if self._inflight_ranks:
+                return  # a response is still running; the incident isn't over
+            # A genuinely decayed score implies a full quiet window since the
+            # last signal, which is never sooner than the last response. If the
+            # last response is more recent, the score we were handed is stale
+            # (it raced a fresh escalation) -- stay armed.
+            if now - self._last_action_ts < self.config.burst_window_sec:
+                return
+            self._last_acted_rank = 0
+            self._last_action_ts = 0.0
+        self.responder.rearm()
+        console.audit("rearm")
+        console.info("Threat window cleared — alerts re-armed.")
 
     def _dispatch_response(self, assessment, rank: int) -> None:
         """Run the (potentially slow) responder off the event thread so file
         events keep flowing. Coalesce: skip if an equal/higher-severity
         response is already running."""
         with self._lock:
-            if self._response_inflight_rank >= rank:
+            # Each in-flight response holds its own slot, so a fast-finishing
+            # CRITICAL can't drop the guard while a slower DEFEND still runs.
+            if self._inflight_ranks and max(self._inflight_ranks) >= rank:
                 return
-            self._response_inflight_rank = rank
+            self._inflight_ranks.append(rank)
 
         def _work():
             try:
@@ -123,7 +155,7 @@ class Monitor:
                     )
             finally:
                 with self._lock:
-                    self._response_inflight_rank = 0
+                    self._inflight_ranks.remove(rank)
 
         threading.Thread(target=_work, daemon=True).start()
 
@@ -131,6 +163,9 @@ class Monitor:
     def _heartbeat_loop(self) -> None:
         while not self._stop.wait(self.heartbeat):
             snap = self.engine.snapshot()
+            # Events stop flowing once an attacker is contained, so the decay
+            # check must also run here, not only in the event path.
+            self._maybe_rearm(snap.score)
             color = _LEVEL_COLOR.get(snap.level, "grey")
             console.info(
                 f"watching {len(self.config.watched_paths)} path(s) · "

@@ -628,6 +628,217 @@ class TestNotify(unittest.TestCase):
             srv.server_close()
 
 
+class TestAlertRearm(unittest.TestCase):
+    def test_monitor_rearms_after_decay(self):
+        from greyrun.monitor import Monitor
+
+        paths, root = _tmp_paths()
+        watched = os.path.join(root, "docs")
+        utils.ensure_dir(watched)
+        cfg = Config(watched_paths=[watched], response_mode="monitor",
+                     desktop_notifications=False)
+        mon = Monitor(cfg, paths)
+        # Pretend a CRITICAL incident already fired its one-shot guards.
+        mon._last_acted_rank = 4
+        mon.responder._alerted_level = "CRITICAL"
+        mon.responder.incident_file = "incident.json"
+
+        mon._maybe_rearm(50)  # still elevated -> no rearm
+        self.assertEqual(mon._last_acted_rank, 4)
+
+        mon._inflight_ranks.append(3)
+        mon._maybe_rearm(0)   # response still running -> no rearm
+        self.assertEqual(mon._last_acted_rank, 4)
+        mon._inflight_ranks.clear()
+
+        mon._last_action_ts = utils.now_ts()
+        mon._maybe_rearm(0)   # last response too recent (stale score) -> no rearm
+        self.assertEqual(mon._last_acted_rank, 4)
+        mon._last_action_ts = 0.0
+
+        mon._maybe_rearm(0)   # fully decayed -> guards reset
+        self.assertEqual(mon._last_acted_rank, 0)
+        self.assertEqual(mon.responder._alerted_level, "")
+        self.assertIsNone(mon.responder.incident_file)
+
+    def test_responder_alerts_again_after_rearm(self):
+        import greyrun.responder as R
+
+        paths, root = _tmp_paths()
+        cfg = Config(watched_paths=[os.path.join(root, "docs")],
+                     response_mode="monitor", desktop_notifications=False)
+        resp = R.Responder(cfg, paths)
+        a = Assessment(score=80, level="DEFEND", reasons=["x [burst]"],
+                       suspect_paths=[], families=[], changed_count=30)
+        first = resp.handle(a)
+        self.assertTrue(any("alert" in x for x in first))
+        second = resp.handle(a)  # same incident -> one-shot guard holds
+        self.assertFalse(any("raised desktop" in x for x in second))
+        resp.rearm()
+        third = resp.handle(a)   # new incident after decay -> alerts again
+        self.assertTrue(any("raised desktop" in x for x in third))
+
+
+class TestWebhookRedirect(unittest.TestCase):
+    def test_redirect_is_refused(self):
+        import http.server
+        import threading
+
+        hits = {"target": 0}
+
+        class Target(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                hits["target"] += 1
+                self.send_response(200)
+                self.end_headers()
+
+            do_GET = do_POST  # urllib downgrades a followed 302 POST to GET
+
+            def log_message(self, *a):
+                pass
+
+        tgt = http.server.HTTPServer(("127.0.0.1", 0), Target)
+        tport = tgt.server_address[1]
+
+        class Redirector(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                self.send_response(302)
+                self.send_header("Location", f"http://127.0.0.1:{tport}/steal")
+                self.end_headers()
+
+            def log_message(self, *a):
+                pass
+
+        red = http.server.HTTPServer(("127.0.0.1", 0), Redirector)
+        rport = red.server_address[1]
+        threading.Thread(target=red.handle_request, daemon=True).start()
+        threading.Thread(target=tgt.handle_request, daemon=True).start()
+        try:
+            a = Assessment(score=1, level="CRITICAL", reasons=[],
+                           suspect_paths=[], families=[], changed_count=0)
+            ok = notify.send_webhook(f"http://127.0.0.1:{rport}/hook", a, [])
+            self.assertFalse(ok)          # redirect refused -> send fails
+            # The refusal is synchronous, so the count is already final here.
+            self.assertEqual(hits["target"], 0)  # payload never followed it
+        finally:
+            red.server_close()
+            tgt.server_close()
+
+
+class TestQuarantineThreshold(unittest.TestCase):
+    def test_is_artifact_honours_threshold(self):
+        d = tempfile.mkdtemp(prefix="grqt_")
+        doc = os.path.join(d, "notes.txt")
+        with open(doc, "wb") as fh:
+            fh.write(os.urandom(20000))  # ~8.0 bits/byte
+        self.assertEqual(quarantine.is_artifact(doc), "document looks encrypted")
+        # An unreachable configured threshold disables the entropy signal.
+        self.assertIsNone(quarantine.is_artifact(doc, entropy_threshold=9.0))
+
+
+class TestConfigTypeValidation(unittest.TestCase):
+    def test_wrong_types_fall_back_to_defaults(self):
+        paths, _ = _tmp_paths()
+        with open(paths.config, "w", encoding="utf-8") as fh:
+            json.dump({"watched_paths": "C:\\not-a-list",
+                       "burst_count": "lots",
+                       "entropy_threshold": "high",
+                       "auto_lockdown": "yes",
+                       "webhook_url": 42,
+                       "exclude_dirs": ["keep-me"]}, fh)
+        cfg = Config.load(paths)
+        defaults = Config()
+        self.assertEqual(cfg.watched_paths, [])            # str is not a list
+        self.assertEqual(cfg.burst_count, defaults.burst_count)
+        self.assertEqual(cfg.entropy_threshold, defaults.entropy_threshold)
+        self.assertEqual(cfg.auto_lockdown, defaults.auto_lockdown)
+        self.assertEqual(cfg.webhook_url, "")
+        self.assertEqual(cfg.exclude_dirs, ["keep-me"])    # valid field kept
+
+    def test_numeric_coercion(self):
+        paths, _ = _tmp_paths()
+        with open(paths.config, "w", encoding="utf-8") as fh:
+            json.dump({"burst_count": 30.0, "burst_window_sec": 45}, fh)
+        cfg = Config.load(paths)
+        self.assertEqual(cfg.burst_count, 30)              # float -> int field
+        self.assertEqual(cfg.burst_window_sec, 45.0)       # int -> float field
+
+    def test_bool_fields_accept_zero_one(self):
+        # Hand-edited JSON commonly uses 0/1 for booleans; a dropped 0 would
+        # silently flip a user-disabled setting back to its True default.
+        paths, _ = _tmp_paths()
+        with open(paths.config, "w", encoding="utf-8") as fh:
+            json.dump({"desktop_notifications": 0, "auto_lockdown": 1,
+                       "smtp_tls": "no"}, fh)
+        cfg = Config.load(paths)
+        self.assertIs(cfg.desktop_notifications, False)
+        self.assertIs(cfg.auto_lockdown, True)
+        self.assertIs(cfg.smtp_tls, True)                  # invalid -> default
+
+
+class TestIdUniqueness(unittest.TestCase):
+    def test_same_second_quarantine_batches_stay_distinct(self):
+        paths, root = _tmp_paths()
+        watched = os.path.join(root, "docs")
+        utils.ensure_dir(watched)
+        ids = set()
+        for i in range(2):
+            f = os.path.join(watched, f"r{i}.docx.locked")
+            with open(f, "wb") as fh:
+                fh.write(b"x")
+            res = quarantine.quarantine_files(paths, [(f, "ext")], roots=[watched])
+            self.assertEqual(res.moved, 1)
+            ids.add(res.batch_id)
+        self.assertEqual(len(ids), 2)
+        self.assertEqual(len(quarantine.list_batches(paths)), 2)
+
+    def test_same_second_snapshots_stay_distinct(self):
+        paths, root = _tmp_paths()
+        watched = os.path.join(root, "docs")
+        utils.ensure_dir(watched)
+        with open(os.path.join(watched, "a.txt"), "w") as fh:
+            fh.write("data")
+        cfg = Config(watched_paths=[watched])
+        s1 = backup_mod.create_snapshot(cfg, paths)
+        s2 = backup_mod.create_snapshot(cfg, paths)
+        self.assertNotEqual(s1.id, s2.id)
+        self.assertEqual(len(backup_mod.list_snapshots(paths)), 2)
+
+    def test_latest_resolves_newest_same_second_snapshot(self):
+        # A same-second collision suffix must not invert 'latest' resolution
+        # ('-02.json' sorts before '.json' when whole filenames are compared).
+        paths, root = _tmp_paths()
+        watched = os.path.join(root, "docs")
+        utils.ensure_dir(watched)
+        f = os.path.join(watched, "doc.txt")
+        cfg = Config(watched_paths=[watched])
+        with open(f, "w") as fh:
+            fh.write("old contents")
+        backup_mod.create_snapshot(cfg, paths)
+        with open(f, "w") as fh:
+            fh.write("new contents")
+        backup_mod.create_snapshot(cfg, paths)
+
+        os.remove(f)
+        dest = os.path.join(root, "restored")
+        result = backup_mod.restore(paths, "latest", into=dest)
+        self.assertEqual(result.restored, 1)
+        with open(os.path.join(dest, "doc.txt")) as fh:
+            self.assertEqual(fh.read(), "new contents")
+
+    def test_same_second_forensics_stay_distinct(self):
+        import greyrun.responder as R
+
+        paths, _ = _tmp_paths()
+        a = Assessment(score=120, level="CRITICAL", reasons=["x [canary]"],
+                       suspect_paths=[], families=[], changed_count=1)
+        f1 = R.capture_forensics(paths, [], a)
+        f2 = R.capture_forensics(paths, [], a)
+        self.assertIsNotNone(f1)
+        self.assertIsNotNone(f2)
+        self.assertNotEqual(f1, f2)  # second incident must not overwrite the first
+
+
 class TestServiceAutostart(unittest.TestCase):
     def test_command_is_quoted(self):
         from greyrun import service

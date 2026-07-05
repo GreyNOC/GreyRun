@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import os
 from datetime import datetime, timezone
-from typing import Iterable, Iterator, List, Optional, Sequence
+from typing import Callable, Iterable, Iterator, List, Optional, Sequence
 
 # Directories we never descend into: noisy, volatile, or owned by GreyRun.
 DEFAULT_EXCLUDE_DIRS = {
@@ -29,6 +29,26 @@ def iso(ts: Optional[float] = None) -> str:
     if ts is None:
         ts = now_ts()
     return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat(timespec="seconds")
+
+
+def stamp_id(ts: Optional[float] = None) -> str:
+    """Filesystem-safe UTC timestamp ID (1s resolution), e.g. 20260705T175248Z."""
+    return iso(ts).replace(":", "").replace("-", "").replace("+0000", "Z")
+
+
+def claim_unique_id(base_id: str, claim: Callable[[str], bool]) -> str:
+    """Return the first of ``base_id``, ``base_id-02``, ``base_id-03``, … that
+    ``claim`` takes ownership of.
+
+    ``claim`` must create the ID's file/directory atomically (O_EXCL open or
+    mkdir) and return False on a collision, so two same-second writers -- even
+    in separate processes -- can never claim the same ID. Zero-padding keeps
+    suffixed IDs in lexical == chronological order (up to 99 per second)."""
+    candidate, n = base_id, 1
+    while not claim(candidate):
+        n += 1
+        candidate = f"{base_id}-{n:02d}"
+    return candidate
 
 
 def human_size(num: float) -> str:

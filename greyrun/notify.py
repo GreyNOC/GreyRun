@@ -90,6 +90,18 @@ def _is_blocked_host(host: str) -> bool:
     return False
 
 
+class _RefuseRedirects(urllib.request.HTTPRedirectHandler):
+    """A redirect target is never re-checked against the SSRF guard, so a
+    malicious endpoint could 302-bounce the alert payload to a blocked address
+    (e.g. cloud metadata). Webhooks have no business redirecting: refuse."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+_OPENER = urllib.request.build_opener(_RefuseRedirects)
+
+
 def send_webhook(url: str, assessment: Assessment, actions: Optional[List[str]], timeout: float = 6.0) -> bool:
     # Refuse non-routable destinations (e.g. 169.254.169.254 cloud metadata) so
     # a tampered config can't turn alerting into an SSRF/credential-theft vector.
@@ -114,7 +126,7 @@ def send_webhook(url: str, assessment: Assessment, actions: Optional[List[str]],
         url, data=data, headers={"Content-Type": "application/json"}, method="POST"
     )
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with _OPENER.open(req, timeout=timeout) as resp:
             return 200 <= resp.status < 300
     except Exception as exc:
         console.audit("webhook_error", error=str(exc))

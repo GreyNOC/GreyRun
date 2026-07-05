@@ -3,6 +3,46 @@
 All notable changes to GreyRun are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.1.3] — 2026-07-05
+
+### Security
+- **Webhook redirects are refused.** The SSRF guard checked the configured
+  URL's host but the HTTP client then followed redirects, so a malicious
+  endpoint could 302-bounce the alert payload (hostname, file paths) to a
+  blocked address such as the cloud-metadata service.
+
+### Fixed
+- **Alerts re-arm after a threat decays.** Previously the desktop popup,
+  off-box alert and forensics capture fired at most once per monitor run; a
+  second, separate incident hours later would escalate silently. Once the risk
+  score returns to zero the one-shot guards reset (checked from both the event
+  path and the heartbeat, since a contained attacker stops generating events).
+- Response coalescing now tracks every in-flight response (a finishing
+  response — of any severity, in either order — can no longer drop the guard
+  while another is still running), and re-arming is refused while a response
+  is in flight or the last response is younger than the burst window.
+- `quarantine run` and auto-quarantine containment now honour the configured
+  `entropy_threshold`; the auto-containment scope is a full policy copy
+  (`dataclasses.replace`) so future config fields can't be silently dropped.
+- Backup snapshots, quarantine batches **and forensics captures** created
+  within the same second get distinct IDs instead of overwriting/merging
+  (timestamp IDs have 1s resolution). The ID is claimed atomically (O_EXCL
+  create / mkdir), so concurrent runs — even separate processes — can't
+  collide, and `restore latest` resolves suffixed IDs in true chronological
+  order.
+
+### Changed / Hardened
+- `Config.load` type-checks every field against its default (a hand-edited
+  `watched_paths` string no longer silently breaks protection); numeric fields
+  coerce int/float, boolean fields accept hand-edited `0`/`1`.
+- The live engine skips the entropy read (up to 256 KB from disk) for files
+  that already scored in the current window.
+- The monitor's escalation guards are updated under its lock (the heartbeat
+  thread now also reads them), and a corrupt/partial snapshot manifest is
+  reported as not-found instead of crashing restore.
+- Tests: +11 (rearm ×2, webhook redirect, quarantine threshold, config
+  validation ×3, ID uniqueness ×3, latest-resolution order). 48 passing.
+
 ## [1.1.2] — 2026-06-27
 
 A second review pass found and fixed real bugs the earlier reviews missed.
@@ -85,6 +125,7 @@ Initial release.
 - Safe, sandboxed attack simulator for drills.
 - `gr` short CLI alias and `exclude` command for skipping noisy folders.
 
+[1.1.3]: https://github.com/GreyNOC/GreyRun/releases/tag/v1.1.3
 [1.1.2]: https://github.com/GreyNOC/GreyRun/releases/tag/v1.1.2
 [1.1.1]: https://github.com/GreyNOC/GreyRun/releases/tag/v1.1.1
 [1.1.0]: https://github.com/GreyNOC/GreyRun/releases/tag/v1.1.0

@@ -64,7 +64,18 @@ def create_snapshot(
 ) -> SnapshotInfo:
     """Back up every watched file into a new content-addressed snapshot."""
     paths.ensure()
-    snap_id = utils.iso().replace(":", "").replace("-", "").replace("+0000", "Z")
+    snap_dir = _snapshots_dir(paths)
+
+    def _claim(candidate: str) -> bool:
+        try:
+            # O_EXCL create is the atomic claim: two same-second snapshot runs
+            # (even in separate processes) cannot take the same manifest name.
+            with open(os.path.join(snap_dir, f"{candidate}.json"), "x", encoding="utf-8"):
+                return True
+        except FileExistsError:
+            return False
+
+    snap_id = utils.claim_unique_id(utils.stamp_id(), _claim)
     files_meta: List[dict] = []
     total = 0
     deduped = 0
@@ -120,7 +131,6 @@ def create_snapshot(
         "roots": list(config.watched_paths),
         "files": files_meta,
     }
-    snap_dir = _snapshots_dir(paths)
     with open(os.path.join(snap_dir, f"{snap_id}.json"), "w", encoding="utf-8") as fh:
         json.dump(manifest, fh, indent=0)
 
@@ -133,12 +143,20 @@ def create_snapshot(
     )
 
 
+def _sorted_manifest_names(snap_dir: str) -> List[str]:
+    """Manifest filenames in id (stem) order. Sorting whole filenames would
+    put a same-second '<id>-02.json' *before* '<id>.json' ('-' < '.'), making
+    'latest' resolve to the older snapshot."""
+    return sorted(
+        (n for n in os.listdir(snap_dir) if n.endswith(".json")),
+        key=lambda n: n[: -len(".json")],
+    )
+
+
 def list_snapshots(paths: Paths) -> List[SnapshotInfo]:
     snap_dir = _snapshots_dir(paths)
     out: List[SnapshotInfo] = []
-    for name in sorted(os.listdir(snap_dir)):
-        if not name.endswith(".json"):
-            continue
+    for name in _sorted_manifest_names(snap_dir):
         try:
             with open(os.path.join(snap_dir, name), "r", encoding="utf-8") as fh:
                 m = json.load(fh)
@@ -157,14 +175,21 @@ def list_snapshots(paths: Paths) -> List[SnapshotInfo]:
     return out
 
 
+def _read_manifest(path: str) -> Optional[dict]:
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, json.JSONDecodeError):
+        return None  # unreadable/partial manifest (e.g. interrupted snapshot)
+
+
 def _load_manifest(paths: Paths, snapshot_id: str) -> Optional[dict]:
     snap_dir = _snapshots_dir(paths)
     candidate = os.path.join(snap_dir, f"{snapshot_id}.json")
     if os.path.exists(candidate):
-        with open(candidate, "r", encoding="utf-8") as fh:
-            return json.load(fh)
+        return _read_manifest(candidate)
     # Allow "latest" and prefix matches.
-    snaps = sorted(n for n in os.listdir(snap_dir) if n.endswith(".json"))
+    snaps = _sorted_manifest_names(snap_dir)
     if not snaps:
         return None
     if snapshot_id in ("latest", "last"):
@@ -174,8 +199,7 @@ def _load_manifest(paths: Paths, snapshot_id: str) -> Optional[dict]:
         if not match:
             return None
         chosen = match[0]
-    with open(os.path.join(snap_dir, chosen), "r", encoding="utf-8") as fh:
-        return json.load(fh)
+    return _read_manifest(os.path.join(snap_dir, chosen))
 
 
 @dataclass

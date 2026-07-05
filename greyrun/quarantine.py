@@ -25,7 +25,7 @@ from typing import List, Optional
 
 from . import utils
 from .config import Config, Paths
-from .entropy import is_document_class, looks_encrypted
+from .entropy import ENCRYPTED_THRESHOLD, is_document_class, looks_encrypted
 from .signatures import is_ransom_note, is_ransomware_ext
 
 
@@ -41,13 +41,16 @@ def _set_readonly(path: str, on: bool = True) -> None:
         pass
 
 
-def is_artifact(path: str, include_encrypted: bool = True) -> Optional[str]:
+def is_artifact(path: str, include_encrypted: bool = True,
+                entropy_threshold: float = ENCRYPTED_THRESHOLD) -> Optional[str]:
     """Return a reason string if ``path`` looks like a ransomware artifact."""
     if is_ransomware_ext(path):
         return "ransomware extension"
     if is_ransom_note(path):
         return "ransom note"
-    if include_encrypted and is_document_class(path) and looks_encrypted(path):
+    if include_encrypted and is_document_class(path) and looks_encrypted(
+        path, threshold=entropy_threshold,
+    ):
         return "document looks encrypted"
     return None
 
@@ -56,7 +59,8 @@ def find_artifacts(config: Config, include_encrypted: bool = True) -> List[tuple
     """Scan the watched tree for artifacts. Returns ``(path, reason)`` pairs."""
     found = []
     for path in utils.iter_files(config.watched_paths, config.exclude_dirs):
-        reason = is_artifact(path, include_encrypted)
+        reason = is_artifact(path, include_encrypted,
+                             entropy_threshold=config.entropy_threshold)
         if reason:
             found.append((path, reason))
     return found
@@ -79,9 +83,18 @@ def quarantine_files(paths: Paths, items: List[tuple],
     read-only so a surviving process cannot keep using them. ``roots`` (the
     watched paths) is recorded so restore can refuse to write outside them.
     """
-    batch_id = utils.iso().replace(":", "").replace("-", "").replace("+0000", "Z")
+    def _claim(candidate: str) -> bool:
+        try:
+            # mkdir is the atomic claim: two same-second batches (even from
+            # concurrent responses) cannot merge into one directory.
+            os.makedirs(os.path.join(paths.quarantine, candidate, "files"))
+            return True
+        except FileExistsError:
+            return False
+
+    batch_id = utils.claim_unique_id(utils.stamp_id(), _claim)
     batch_dir = os.path.join(paths.quarantine, batch_id)
-    files_dir = utils.ensure_dir(os.path.join(batch_dir, "files"))
+    files_dir = os.path.join(batch_dir, "files")
     manifest_entries = []
     moved = failed = 0
 
