@@ -24,23 +24,37 @@ New ransomware strains appear daily, so a signature for "WannaCry" or "LockBit"
 always lags the latest variant. Almost all ransomware behaves the same way:
 
 * it sweeps through a folder opening and rewriting many files quickly,
-* the rewritten files become **high-entropy** (encrypted data looks random),
-* it **appends a new extension** (`.locked`, `.wncry`, …) and
-* it **drops a ransom note** (`HOW_TO_DECRYPT.txt`).
+* the rewritten files become **ciphertext** (near-random bytes — and unlike
+  merely *compressed* data, they also pass a chi-square uniformity test),
+* it **appends a new extension** (`.locked`, `.wncry`, or one nobody has
+  catalogued yet) and
+* it **drops a ransom note** (`HOW_TO_DECRYPT.txt` — or `README.txt` with
+  ransom prose inside).
 
-GreyRun watches for exactly those tells. Five independent detectors feed one
+GreyRun watches for exactly those tells. Nine independent detectors feed one
 risk score:
 
 | Detector | Signal | Strength |
 |---|---|---|
-| **Canary honeypots** | A decoy file is modified/renamed/deleted | Decisive |
-| **Entropy analysis** | A document suddenly reads as random bytes | High |
-| **Behavioural burst** | Many files changed in a short window | High |
-| **Extension signatures** | Known ransomware suffix appears | Medium |
-| **Ransom-note detection** | A note-like filename appears | Medium |
+| **Canary honeypots** | A decoy file's *content* changed in place | Decisive |
+| | A decoy went missing (re-verified after a beat) | High |
+| **Entropy + chi-square** | A document reads as ciphertext, not just compressed | High |
+| **Header validation** | A `.docx`/`.jpg`/`.zip`/… no longer starts like one and reads as random — catches in-place encryption that keeps filenames | High |
+| **Stranded extension** | `invoice.docx.k8s3x` with ciphertext content — catches novel strains on the first file | High |
+| **Ransom-note content** | A small text file combines payment + threat + contact topics (Bitcoin addresses are checksum-verified) | High |
+| **Behavioural burst** | Many *existing* files rewritten in a short window | Medium |
+| **Extension signatures** | Known family suffix (`.lockbit`) or a generic one over a document (`report.docx.enc`) | Medium |
+| **Rename clustering** | Many files gain the *same* unknown extension | Context |
 
-No single weak signal trips a response; they accumulate, and the strongest
-(a touched canary) is on its own enough to act.
+Scoring is corroboration-based: **one noisy detector can warn you but never
+fight back alone**. Every signal except a modified canary is capped below the
+process-suspension threshold, one text file can never reach kill level, and
+volume evidence (bursts, mass deletes) only escalates past a warning when
+content-, note- or canary-class evidence agrees — so a git checkout, an
+Office mail-merge or a OneDrive sync storm can raise an alert at most, while
+a real sweep lights up several classes at once and escalates in seconds.
+Strong per-file evidence is also remembered for 30 minutes, so a *slow*
+encryptor can't hide by pausing between files.
 
 ---
 
@@ -265,9 +279,11 @@ keep the backup vault out of an attacker's reach):
 cli ──► config
         ├─ canary      honeypot deploy / verify / tamper-check
         ├─ baseline    integrity manifest + drift diff
-        ├─ entropy     Shannon-entropy / "looks encrypted?"
-        ├─ signatures  ransomware extensions & ransom-note names
-        ├─ detector    scan() + BehaviorEngine (windowed risk scoring)
+        ├─ entropy     Shannon entropy + chi-square / "reads as ciphertext?"
+        ├─ filetypes   magic-byte tables / header-vs-extension validation
+        ├─ signatures  ransomware extensions, note names, transient files
+        ├─ notecontent ransom-note body scoring (topics + payment anchors)
+        ├─ detector    scan() + BehaviorEngine (corroborated risk scoring)
         ├─ monitor     watchdog/polling → detector → responder
         ├─ responder   identify → suspend → terminate → contain → forensics
         ├─ quarantine  move/restore ransomware artifacts

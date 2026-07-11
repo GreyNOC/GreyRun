@@ -20,11 +20,16 @@ from .config import Config, Paths
 
 # Decoy names chosen to (a) look valuable to an attacker and (b) sit at the
 # alphabetical extremes of a directory listing.
+#
+# Never use names real software claims for itself: Office writes a `~$<name>`
+# owner-lock file the moment a user opens a same-stem workbook (silently
+# replacing a `~$` canary -- a decisive-signal false positive), and .tmp /
+# .partial / .lock / Thumbs.db-style names collide the same way.
 CANARY_NAMES = [
     "00__account_backup.xlsx",
     "0_master_keyfile.txt",
     "01_password_vault_export.docx",
-    "~$financial_statements.xlsx",
+    "00_wire_transfer_keys.csv",
     "zzz_payroll_records_2025.csv",
 ]
 
@@ -68,7 +73,13 @@ def _clear_hidden(path: str) -> None:
 @dataclass
 class CanaryStatus:
     path: str
-    state: str  # "ok" | "modified" | "missing"
+    # "ok"          intact
+    # "modified"    content changed in place -- the decisive tamper signal
+    # "missing"     file gone but its directory survives -- likely deleted
+    # "missing_dir" whole directory gone -- a folder move/rename, not a tamper
+    # "unreadable"  stat/read failed for another reason
+    # "placeholder" dehydrated to a cloud stub (OneDrive Files On-Demand)
+    state: str
 
 
 def _registry_load(paths: Paths) -> Dict[str, dict]:
@@ -94,12 +105,33 @@ def load_paths(paths: Paths) -> List[str]:
     return list(_registry_load(paths).keys())
 
 
+def _migrate_tilde_entries(registry: Dict[str, dict]) -> None:
+    """Retire canaries deployed under the old `~$` name (it collides with
+    Office owner-lock files). The file itself is deleted only if its content
+    still hashes to the registered canary body -- a real Office lock file that
+    replaced the canary is never touched."""
+    import hashlib
+
+    for path in [p for p in registry if os.path.basename(p).startswith("~$")]:
+        meta = registry.pop(path)
+        try:
+            if os.path.exists(path):
+                with open(path, "rb") as fh:
+                    data = fh.read()
+                if hashlib.sha256(data).hexdigest() == meta.get("sha256"):
+                    _clear_hidden(path)
+                    os.remove(path)
+        except OSError:
+            pass
+
+
 def deploy(config: Config, paths: Paths) -> Tuple[int, int]:
     """Plant canaries in every watched directory.
 
     Returns ``(created, skipped)``. Existing canaries are preserved.
     """
     registry = _registry_load(paths)
+    _migrate_tilde_entries(registry)
     created = 0
     skipped = 0
     n = max(1, min(config.canaries_per_dir, len(CANARY_NAMES)))
@@ -135,25 +167,43 @@ def deploy(config: Config, paths: Paths) -> Tuple[int, int]:
     return created, skipped
 
 
+# Windows attribute bits marking a cloud-sync placeholder (a dehydrated
+# OneDrive Files-On-Demand stub): OFFLINE and RECALL_ON_DATA_ACCESS.
+_PLACEHOLDER_ATTRS = 0x1000 | 0x400000
+
+
+def _is_placeholder(path: str) -> bool:
+    st = utils.safe_stat(path)
+    attrs = getattr(st, "st_file_attributes", 0) if st else 0
+    return bool(attrs & _PLACEHOLDER_ATTRS)
+
+
 def _canary_state(path: str, meta: dict) -> str:
-    """Return 'ok' | 'modified' | 'missing' for one canary.
+    """Return the :class:`CanaryStatus` state string for one canary.
 
     Size is checked first, so an *append* or *truncate* (which a prefix-only
     hash would miss) is caught without reading the file; only when the size is
-    unchanged do we hash the full content to detect in-place edits."""
+    unchanged do we hash the full content to detect in-place edits. Only
+    'modified' is the decisive tamper verdict -- absence and unreadability
+    have benign causes (folder moves, cloud dehydration, AV holds) and the
+    detectors weigh them accordingly."""
     if not os.path.exists(path):
+        if not os.path.isdir(os.path.dirname(path)):
+            return "missing_dir"  # the whole folder moved/renamed
         return "missing"
+    if _is_placeholder(path):
+        return "placeholder"  # dehydrated cloud stub; content not local
     try:
         size = os.path.getsize(path)
     except OSError:
-        return "modified"
+        return "unreadable"
     if size != meta.get("size"):
         return "modified"  # appended/truncated -> tampered
     import hashlib
 
     data = utils.read_sample(path, meta["size"])  # size matches -> whole file
     if data is None:
-        return "modified"
+        return "unreadable"
     return "ok" if hashlib.sha256(data).hexdigest() == meta.get("sha256") else "modified"
 
 

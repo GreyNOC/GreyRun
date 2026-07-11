@@ -113,7 +113,10 @@ class Monitor:
     def _maybe_rearm(self, score: int) -> None:
         """Once a raised threat has fully decayed (score back to 0), re-arm the
         one-shot alert and escalation guards so the next incident in this
-        monitor run alerts, escalates and captures forensics again."""
+        monitor run alerts, escalates and captures forensics again. A held
+        'sustained' signal keeps the score above zero for up to
+        ``memory_window_sec`` after strong content evidence, so the guards
+        intentionally stay armed while that memory is warm."""
         if score != 0 or self._last_acted_rank == 0:
             return  # unlocked fast path: benign steady state pays no lock
         now = utils.now_ts()

@@ -53,6 +53,32 @@ class Config:
     burst_window_sec: float = 60.0  # ... within this many seconds = a burst
     canaries_per_dir: int = 3
     max_hash_bytes: int = 64 * 1024 * 1024  # prefix-hash files larger than this
+    # Chi-square-vs-uniform ceiling for "reads as ciphertext" (ciphertext ~255,
+    # compressed data lands well above; see entropy.py).
+    chi2_max: float = 320.0
+    # Scan-only: flag a baselined low-entropy file whose entropy rose at least
+    # this much and now reads as ciphertext.
+    entropy_jump_min: float = 2.0
+    # Header (magic-byte) validation of formats the entropy check must skip.
+    header_check: bool = True
+    header_settle_sec: float = 2.0   # quiet time before reading (skip mid-writes)
+    header_min_size: int = 512       # smaller heads prove nothing
+    # A missing canary is re-verified after this long before scoring, so a
+    # sync/backup race that briefly removes it never counts.
+    canary_recheck_sec: float = 0.3
+    # Distinct files gaining the same unknown extension within the burst
+    # window before the rename-cluster signal fires.
+    ext_cluster_count: int = 12
+    # Transient working files (~$x, *.tmp, *.part) never feed per-file
+    # detectors; count them toward the change burst only if enabled here.
+    count_transient_in_burst: bool = False
+    # Long memory for strong per-file evidence: N hits within this window add
+    # a "sustained" signal so a slow encryptor can't hide between bursts.
+    # 0 disables.
+    memory_window_sec: float = 1800.0
+    sustained_content_min: int = 3
+    # Ransom-note content scoring reads text-like files up to this size.
+    note_scan_max_bytes: int = 32768
 
     # --- risk scoring -> response escalation (points) ---
     alert_score: int = 40    # surface a warning

@@ -205,8 +205,15 @@ def cmd_scan(args, config: Config, paths: Paths) -> int:
     console.plain(f"  Canaries checked  : {report.canaries_total}"
                   + (f"  ({len(report.canaries_bad)} COMPROMISED)" if report.canaries_bad else "  (all intact)"))
     console.plain(f"  Ransomware exts   : {len(report.ransomware_ext)}")
-    console.plain(f"  Ransom notes      : {len(report.ransom_notes)}")
+    console.plain(f"  Ransom notes      : {len(report.ransom_notes)}"
+                  + (f"  (+{len(report.ransom_note_content)} by content)"
+                     if report.ransom_note_content else ""))
     console.plain(f"  Encrypted-looking : {len(report.encrypted_like)}")
+    console.plain(f"  Header mismatches : {len(report.header_mismatch)}"
+                  + (f"  (+{len(report.stranded)} stranded)"
+                     if report.stranded else ""))
+    if report.entropy_jumps:
+        console.plain(f"  Entropy jumps     : {len(report.entropy_jumps)}")
     if report.diff is not None:
         d = report.diff
         console.plain(f"  Baseline drift    : {len(d.modified)} modified, "

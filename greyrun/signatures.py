@@ -4,10 +4,18 @@ These are *supporting* signals. GreyRun's strongest detections are behavioural
 (canary tampering, entropy jumps, mass-modification bursts); signatures add
 weight and human-readable context ("this looks like LockBit") but are never
 relied on alone, because extensions are trivially changed by new variants.
+
+This module also owns the *benign* filename knowledge the detectors need to
+stay quiet: transient working files (Office save dances, browser download
+shards), trailing extensions that legitimately wrap a document (.bak, .gpg),
+and the split between high-confidence family extensions and generic ones that
+collide with everyday tools (a bare ``backup.enc`` is usually openssl, not
+ransomware).
 """
 
 from __future__ import annotations
 
+import os
 import re
 from typing import Optional
 
@@ -87,6 +95,97 @@ RANSOM_NOTE_PATTERNS = [
 ]
 
 
+# Ransomware extensions that everyday tools also produce. A bare `backup.enc`
+# is far more often openssl or a licensing tool than ransomware, so these score
+# only as weak context on their own -- unless they are stacked over a real
+# document extension (`report.docx.enc`), which is the append-a-suffix tell.
+GENERIC_EXTENSIONS = {
+    ".enc", ".encrypted", ".locked", ".crypt", ".crypto", ".onion",
+    ".play", ".stop", ".good", ".magic", ".lol", ".eight", ".hive",
+    ".royal", ".cactus", ".medusa", ".sage", ".purge", ".combo", ".gamma",
+    ".pzdc", ".rdm", ".rrk", ".bleep", ".toxcrypt",
+}
+
+# Working files that normal software churns through constantly. They are never
+# content-checked and (by default) don't count toward the change burst; their
+# *deletions* still count, so a wiper stays visible.
+TRANSIENT_EXTS = frozenset({
+    ".tmp", ".temp", ".crdownload", ".part", ".partial", ".download",
+    ".opdownload", ".swp", ".swx", ".swo", ".lock", ".db-wal", ".db-shm",
+    ".etl", ".laccdb",
+})
+TRANSIENT_PREFIXES = ("~$", ".~", "~")
+
+# A final suffix that legitimately wraps another file: backups, encryption the
+# user asked for (gpg, age, AES Crypt, AxCrypt), checksums, download managers,
+# sync placeholders. `report.docx.gpg` is the user's own work, not a stranded
+# victim -- and single-file encryptors matter especially, because their output
+# genuinely reads as ciphertext and would otherwise score.
+BENIGN_TRAILING_EXTS = frozenset({
+    ".bak", ".backup", ".old", ".orig", ".gpg", ".pgp", ".asc", ".sig",
+    ".age", ".aes", ".axx", ".cpt", ".kdbx",
+    ".sha256", ".md5", ".b64", ".torrent", ".aria2", ".!ut", ".icloud",
+    ".sync", ".lnk", ".url",
+}) | TRANSIENT_EXTS
+
+# Extensions users actually keep data in. Used to recognise a document
+# extension buried under a foreign suffix (`invoice.docx.k8s3x`). Kept local
+# so signatures.py stays import-free of entropy.py.
+USER_CONTENT_EXTS = frozenset({
+    ".txt", ".csv", ".tsv", ".md", ".rtf",
+    ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+    ".odt", ".ods", ".odp", ".pdf", ".eml", ".msg", ".pst", ".one", ".pub",
+    ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tif", ".tiff", ".heic",
+    ".webp", ".svg", ".psd",
+    ".mp3", ".m4a", ".wav", ".flac", ".mp4", ".mov", ".avi", ".mkv",
+    ".zip", ".7z", ".rar", ".sql",
+})
+
+
+def is_transient(path: str) -> bool:
+    """True for working files (lock/temp/partial-download) that normal
+    software churns through and the per-file detectors must ignore."""
+    name = os.path.basename(path)
+    if name.startswith(TRANSIENT_PREFIXES):
+        return True
+    return file_ext(path) in TRANSIENT_EXTS
+
+
+def _inner_ext(path: str) -> str:
+    """The extension buried under the final suffix: 'a.docx.enc' -> '.docx'."""
+    stem = os.path.splitext(os.path.basename(path))[0]
+    return os.path.splitext(stem)[1].lower()
+
+
+def is_double_document_ext(path: str) -> bool:
+    """True if a real document extension sits directly under the final suffix
+    (`report.docx.enc`) -- the shape left by suffix-appending ransomware."""
+    return _inner_ext(path) in USER_CONTENT_EXTS
+
+
+def is_stranded_document_ext(path: str) -> bool:
+    """True if a document extension is stranded under an *unknown* final
+    suffix: `invoice.docx.k8s3x`. Known ransomware suffixes are excluded
+    (already scored as extension hits), and so are benign trailing suffixes
+    and split-archive digits. This is a *name* test only -- callers must
+    confirm the content looks encrypted before scoring it."""
+    stem, final = os.path.splitext(os.path.basename(path))
+    final = final.lower()
+    if (
+        not final
+        or final in BENIGN_TRAILING_EXTS
+        or final in RANSOMWARE_EXTENSIONS
+        or final in USER_CONTENT_EXTS
+    ):
+        return False
+    body = final[1:]
+    if body.isdigit():  # .001 split archives, dated suffixes
+        return False
+    if not (2 <= len(body) <= 12 and body.isalnum()):
+        return False
+    return _inner_ext(path) in USER_CONTENT_EXTS
+
+
 def ransomware_family(path: str) -> Optional[str]:
     """Return the family name if the extension is a known ransomware suffix."""
     return RANSOMWARE_EXTENSIONS.get(file_ext(path))
@@ -96,10 +195,17 @@ def is_ransomware_ext(path: str) -> bool:
     return file_ext(path) in RANSOMWARE_EXTENSIONS
 
 
+def ext_confidence(path: str) -> Optional[str]:
+    """'family' for a suffix specific to a known strain, 'generic' for one
+    that everyday tools also produce, None for anything else."""
+    ext = file_ext(path)
+    if ext not in RANSOMWARE_EXTENSIONS:
+        return None
+    return "generic" if ext in GENERIC_EXTENSIONS else "family"
+
+
 def is_ransom_note(path: str) -> bool:
     """True if the *filename* matches a known/likely ransom-note name."""
-    import os
-
     name = os.path.basename(path).lower()
     if name in RANSOM_NOTE_NAMES:
         return True
